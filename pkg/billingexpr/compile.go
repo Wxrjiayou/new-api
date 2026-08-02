@@ -63,6 +63,8 @@ var compileEnvPrototypeV1 = map[string]interface{}{
 	"abs":     math.Abs,
 	"ceil":    math.Ceil,
 	"floor":   math.Floor,
+	"maxEdge": func(interface{}) float64 { return 0 },
+	"pixels":  func(interface{}) float64 { return 0 },
 }
 
 func getCompileEnv(version int) map[string]interface{} {
