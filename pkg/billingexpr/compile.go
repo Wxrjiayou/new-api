@@ -155,6 +155,8 @@ var compileEnvPrototypeV1 = map[string]any{
 	"abs":         math.Abs,
 	"ceil":        math.Ceil,
 	"floor":       math.Floor,
+	"maxEdge":     func(any) float64 { return 0 },
+	"pixels":      func(any) float64 { return 0 },
 }
 
 func getCompileEnv(version int) map[string]any {

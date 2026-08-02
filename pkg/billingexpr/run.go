@@ -3,6 +3,7 @@ package billingexpr
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,6 +145,20 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 		"abs":     math.Abs,
 		"ceil":    math.Ceil,
 		"floor":   math.Floor,
+		"maxEdge": func(source interface{}) float64 {
+			w, h := parseDimensions(source)
+			if w == 0 && h == 0 {
+				return 0
+			}
+			if w > h {
+				return float64(w)
+			}
+			return float64(h)
+		},
+		"pixels": func(source interface{}) float64 {
+			w, h := parseDimensions(source)
+			return float64(w) * float64(h)
+		},
 	}
 
 	out, err := expr.Run(prog, env)
@@ -183,4 +198,27 @@ func normalizeHeaders(headers map[string]string) map[string]string {
 		normalized[k] = v
 	}
 	return normalized
+}
+
+func parseDimensions(source interface{}) (int, int) {
+	if source == nil {
+		return 0, 0
+	}
+	s, ok := source.(string)
+	if !ok {
+		return 0, 0
+	}
+	parts := strings.SplitN(strings.ToLower(strings.TrimSpace(s)), "x", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	w, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || w <= 0 {
+		return 0, 0
+	}
+	h, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || h <= 0 {
+		return 0, 0
+	}
+	return w, h
 }
