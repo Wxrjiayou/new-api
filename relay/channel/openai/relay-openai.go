@@ -147,6 +147,20 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 	})
 
+	if info.SendResponseCount == 0 && lastStreamData != "" {
+		var probe struct {
+			Error *struct {
+				Message string `json:"message"`
+				Code    string `json:"code"`
+			} `json:"error"`
+		}
+		if err := common.UnmarshalJsonStr(lastStreamData, &probe); err == nil && probe.Error != nil {
+			errMsg := fmt.Sprintf("upstream stream error: [%s] %s", probe.Error.Code, probe.Error.Message)
+			logger.LogError(c, errMsg)
+			return nil, types.NewOpenAIError(fmt.Errorf("%s", errMsg), types.ErrorCodeBadResponse, http.StatusBadGateway)
+		}
+	}
+
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
 		var streamResp struct {
