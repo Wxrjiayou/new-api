@@ -84,7 +84,19 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 	return claudeErr
 }
 
+const upstreamUnavailableMessage = "The upstream server is temporarily unavailable, please try again later"
+
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
+	var originalBodyPreview string
+	defer func() {
+		if newApiErr != nil && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable) {
+			if originalBodyPreview != "" {
+				logger.LogWarn(ctx, fmt.Sprintf("upstream %d intercepted, original: %s", resp.StatusCode, originalBodyPreview))
+			}
+			newApiErr = types.NewOpenAIError(errors.New(upstreamUnavailableMessage), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+		}
+	}()
+
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 
 	responseBody, err := io.ReadAll(resp.Body)
@@ -95,6 +107,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	var errResponse dto.GeneralErrorResponse
 	responseBodyText := string(responseBody)
 	responseBodyPreview := common.LocalLogPreview(responseBodyText)
+	originalBodyPreview = responseBodyPreview
 	buildErrWithBody := func(message string) error {
 		if message == "" {
 			return fmt.Errorf("bad response status code %d, body: %s", resp.StatusCode, responseBodyText)

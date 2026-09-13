@@ -613,8 +613,8 @@ func RelayTask(c *gin.Context) {
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
-	if taskErr.StatusCode == http.StatusTooManyRequests {
-		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
+	if taskErr.StatusCode == http.StatusTooManyRequests || taskErr.StatusCode == http.StatusServiceUnavailable {
+		taskErr.Message = "The upstream server is temporarily unavailable, please try again later"
 	}
 	c.JSON(taskErr.StatusCode, taskErr)
 }
