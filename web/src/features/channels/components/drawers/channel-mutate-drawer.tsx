@@ -295,6 +295,7 @@ const SENSITIVE_FORM_FIELDS = [
   'aws_key_type',
   'azure_responses_version',
   'force_format',
+  'force_claude_format',
   'thinking_to_content',
   'proxy',
   'http_protocol',
@@ -316,6 +317,7 @@ const SENSITIVE_FORM_FIELDS = [
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
 ] satisfies (keyof ChannelFormValues)[]
+
 
 function parseSettingsRecord(
   settings: string | undefined
@@ -604,6 +606,7 @@ export function ChannelMutateDrawer({
   const currentHeaderOverride = formValues.header_override
   const currentProxy = formValues.proxy
   const currentHttpProtocol = formValues.http_protocol
+  const currentForceClaudeFormat = formValues.force_claude_format
   const {
     unlocked: doubaoApiEditUnlocked,
     handleClick: handleApiConfigSecretClick,
@@ -1972,6 +1975,80 @@ export function ChannelMutateDrawer({
         </FormItem>
       )}
     />
+  )
+
+  const forceClaudeFormatFields = currentType === 14 && (
+    <>
+      <FormField
+        control={form.control}
+        name='force_claude_format'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between px-4 py-3'>
+            <div className='space-y-0.5'>
+              <FormLabel>{t('Force Claude Format')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Master switch: enable both body and header normalization'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <Switch
+                disabled={sensitiveLocked}
+                checked={field.value}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name='normalize_claude_body'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between px-4 py-3'>
+            <div className='space-y-0.5'>
+              <FormLabel>{t('Normalize Claude Body')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Remove non-official fields from response body (iterations, context_management, etc.)'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <Switch
+                disabled={sensitiveLocked || currentForceClaudeFormat}
+                checked={field.value || currentForceClaudeFormat}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name='normalize_claude_headers'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between px-4 py-3'>
+            <div className='space-y-0.5'>
+              <FormLabel>{t('Normalize Claude Headers')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Replace upstream headers with official Anthropic API headers (request-id, org-id, rate-limit)'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <Switch
+                disabled={sensitiveLocked || currentForceClaudeFormat}
+                checked={field.value || currentForceClaudeFormat}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+    </>
   )
 
   const ollamaOpenAIChatFields = currentType === CHANNEL_TYPE_OLLAMA && (
@@ -4656,6 +4733,7 @@ export function ChannelMutateDrawer({
                   disabled={sensitiveLocked || isSubmitting}
                 />
                 {formatFields}
+                {forceClaudeFormatFields}
                 {ollamaOpenAIChatFields}
                 {thinkingFields}
                 {currentType !== CHANNEL_TYPE_ADVANCED_CUSTOM &&

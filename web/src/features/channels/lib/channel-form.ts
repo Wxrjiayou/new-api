@@ -262,6 +262,7 @@ export const channelFormSchema = z
     key_mode: z.enum(['append', 'replace']).optional(), // For editing multi-key channels
     // Channel extra settings (stored in setting JSON, not sent directly)
     force_format: z.boolean().optional(),
+    force_claude_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
     proxy: z
       .string()
@@ -456,6 +457,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   key_mode: 'append',
   // Channel extra settings
   force_format: false,
+  force_claude_format: false,
   thinking_to_content: false,
   proxy: '',
   http_protocol: HTTP_PROTOCOL_AUTO,
@@ -500,6 +502,7 @@ export function transformChannelToFormDefaults(
     task_plugin_key: '',
     task_extend_plugin_keys: [] as string[],
     force_format: false,
+    force_claude_format: false,
     thinking_to_content: false,
     proxy: '',
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
@@ -521,6 +524,7 @@ export function transformChannelToFormDefaults(
         task_plugin_key: parsed.task_plugin_key || '',
         task_extend_plugin_keys: readTaskExtendPluginKeys(channel.type, parsed),
         force_format: parsed.force_format || false,
+        force_claude_format: parsed.force_claude_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
         http_protocol: protocol,
@@ -654,6 +658,7 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
         ? formData.task_extend_plugin_keys
         : undefined,
     force_format: formData.force_format || false,
+    force_claude_format: formData.force_claude_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled:

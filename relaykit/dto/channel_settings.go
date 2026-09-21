@@ -20,6 +20,7 @@ type ChannelSettings struct {
 	ResponsesWebSocketEnabled bool   `json:"responses_websocket_enabled,omitempty"`
 	SystemPrompt              string `json:"system_prompt,omitempty"`
 	SystemPromptOverride      bool   `json:"system_prompt_override,omitempty"`
+	ForceClaudeFormat         bool   `json:"force_claude_format,omitempty"`
 	// TaskExtendPluginKeys lists the task plugins a New API channel (type 60)
 	// is extended with. The upstream gateway may host many plugins, so the
 	// channel serves every listed plugin's models while the request still pins
