@@ -113,6 +113,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			if !shouldSkipClaudeMessageDeltaUsagePatch(info) {
 				data = patchClaudeMessageDeltaUsageData(data, buildMessageDeltaPatchUsage(&claudeResponse, claudeInfo))
 			}
+			if shouldApplyClaudeNormalize(info) {
+				data = removeClaudeIterationsStr(data)
+			}
 		}
 		countClaudeStreamBillableTools(c, info, &claudeResponse)
 		helper.ClaudeChunkData(c, claudeResponse, data)
@@ -174,6 +177,10 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	}
 	if claudeInfo.Usage != nil && claudeInfo.Usage.BillingUsage == nil {
 		claudeInfo.Usage.BillingUsage = dto.NewClaudeMessagesBillingUsage(buildMessageDeltaPatchUsage(nil, claudeInfo))
+	}
+
+	if shouldApplyClaudeNormalize(info) && claudeInfo.Usage != nil {
+		recordClaudeUsage(info.TokenId, claudeInfo.Usage.PromptTokens, claudeInfo.Usage.CompletionTokens)
 	}
 
 	if info.RelayFormat == types.RelayFormatClaude {
@@ -248,7 +255,11 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 	case types.RelayFormatClaude:
-		responseData = data
+		if shouldApplyClaudeNormalize(info) {
+			responseData = removeClaudeIterations(data)
+		} else {
+			responseData = data
+		}
 	}
 
 	if claudeResponse.Usage != nil && claudeResponse.Usage.ServerToolUse != nil && claudeResponse.Usage.ServerToolUse.WebSearchRequests > 0 {
@@ -261,7 +272,11 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	}
 
-	service.IOCopyBytesGracefully(c, httpResp, responseData)
+	if shouldApplyClaudeNormalize(info) && info.RelayFormat == types.RelayFormatClaude {
+		writeClaudeNormalizedResponse(c, httpResp, responseData, info)
+	} else {
+		service.IOCopyBytesGracefully(c, httpResp, responseData)
+	}
 	return nil
 }
 
@@ -283,6 +298,9 @@ func ClaudeHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayI
 	handleErr := HandleClaudeResponseData(c, info, claudeInfo, resp, responseBody)
 	if handleErr != nil {
 		return nil, handleErr
+	}
+	if shouldApplyClaudeNormalize(info) && claudeInfo.Usage != nil {
+		recordClaudeUsage(info.TokenId, claudeInfo.Usage.PromptTokens, claudeInfo.Usage.CompletionTokens)
 	}
 	return claudeInfo.Usage, nil
 }

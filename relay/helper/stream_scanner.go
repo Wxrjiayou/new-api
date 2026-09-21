@@ -141,7 +141,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	defer cleanup()
 
 	scanner.Split(bufio.ScanLines)
-	copyCodexSSEHeaders(c, resp)
+	if info.ChannelMeta == nil || !info.ChannelSetting.ForceClaudeFormat {
+		copyCodexSSEHeaders(c, resp)
+	}
 	SetEventStreamHeaders(c)
 
 	ctx = context.WithValue(ctx, "stop_chan", stopChan)
