@@ -55,26 +55,72 @@ func deriveWorkspaceID(tokenKey string) string {
 	return uuid.NewSHA1(claudeFormatNamespace, []byte(tokenKey+"workspace")).String()
 }
 
-func removeClaudeIterations(data []byte) []byte {
-	if !gjson.GetBytes(data, "usage.iterations").Exists() {
-		return data
-	}
-	result, err := sjson.DeleteBytes(data, "usage.iterations")
+func deleteBytes(data []byte, path string) []byte {
+	result, err := sjson.DeleteBytes(data, path)
 	if err != nil {
 		return data
 	}
 	return result
 }
 
-func removeClaudeIterationsStr(data string) string {
-	if !gjson.Get(data, "usage.iterations").Exists() {
-		return data
-	}
-	result, err := sjson.Delete(data, "usage.iterations")
+func deleteStr(data string, path string) string {
+	result, err := sjson.Delete(data, path)
 	if err != nil {
 		return data
 	}
 	return result
+}
+
+func setStr(data string, path string, value interface{}) string {
+	result, err := sjson.Set(data, path, value)
+	if err != nil {
+		return data
+	}
+	return result
+}
+
+func setBytes(data []byte, path string, value interface{}) []byte {
+	result, err := sjson.SetBytes(data, path, value)
+	if err != nil {
+		return data
+	}
+	return result
+}
+
+// normalizeClaudeBody normalizes a non-streaming Claude response body to match
+// official API format: removes Max-specific fields, adds official-only fields.
+func normalizeClaudeBody(data []byte) []byte {
+	data = deleteBytes(data, "usage.iterations")
+	data = deleteBytes(data, "context_management")
+	if gjson.GetBytes(data, "usage.inference_geo").Exists() {
+		data = setBytes(data, "usage.inference_geo", "global")
+	}
+	if !gjson.GetBytes(data, "container").Exists() {
+		data = setBytes(data, "container", nil)
+	}
+	return data
+}
+
+// normalizeClaudeStreamEvent normalizes a single SSE event string for streaming.
+func normalizeClaudeStreamEvent(data string, eventType string) string {
+	switch eventType {
+	case "message_start":
+		data = deleteStr(data, "message.context_management")
+		if gjson.Get(data, "message.usage.inference_geo").Exists() {
+			data = setStr(data, "message.usage.inference_geo", "global")
+		}
+		if !gjson.Get(data, "message.container").Exists() {
+			data = setStr(data, "message.container", nil)
+		}
+	case "message_delta":
+		data = deleteStr(data, "context_management")
+		data = deleteStr(data, "usage.iterations")
+		data = deleteStr(data, "usage.cache_creation")
+		if !gjson.Get(data, "delta.container").Exists() {
+			data = setStr(data, "delta.container", nil)
+		}
+	}
+	return data
 }
 
 func writeClaudeNormalizedResponse(c *gin.Context, httpResp *http.Response, data []byte, info *relaycommon.RelayInfo) {

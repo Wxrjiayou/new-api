@@ -103,19 +103,16 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
 
 		if claudeResponse.Type == "message_start" {
-			// message_start, 获取usage
 			if claudeResponse.Message != nil {
 				info.UpstreamModelName = claudeResponse.Message.Model
 			}
 		} else if claudeResponse.Type == "message_delta" {
-			// 确保 message_delta 的 usage 包含完整的 input_tokens 和 cache 相关字段
-			// 解决 AWS Bedrock 等上游返回的 message_delta 缺少这些字段的问题
 			if !shouldSkipClaudeMessageDeltaUsagePatch(info) {
 				data = patchClaudeMessageDeltaUsageData(data, buildMessageDeltaPatchUsage(&claudeResponse, claudeInfo))
 			}
-			if shouldApplyClaudeNormalize(info) {
-				data = removeClaudeIterationsStr(data)
-			}
+		}
+		if shouldApplyClaudeNormalize(info) {
+			data = normalizeClaudeStreamEvent(data, claudeResponse.Type)
 		}
 		countClaudeStreamBillableTools(c, info, &claudeResponse)
 		helper.ClaudeChunkData(c, claudeResponse, data)
@@ -256,7 +253,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	case types.RelayFormatClaude:
 		if shouldApplyClaudeNormalize(info) {
-			responseData = removeClaudeIterations(data)
+			responseData = normalizeClaudeBody(data)
 		} else {
 			responseData = data
 		}
