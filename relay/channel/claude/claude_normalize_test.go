@@ -9,36 +9,99 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestRemoveClaudeIterations_Present(t *testing.T) {
-	input := `{"usage":{"input_tokens":8,"output_tokens":16,"iterations":[{"input_tokens":8,"output_tokens":16}],"service_tier":"standard"}}`
-	result := removeClaudeIterations([]byte(input))
+func TestNormalizeClaudeBody_Full(t *testing.T) {
+	input := `{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[{"type":"text","text":"Hi"}],"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"service_tier":"standard","inference_geo":"not_available","iterations":[{"input_tokens":8,"output_tokens":16}]},"context_management":{"applied_edits":[]}}`
 
-	require.False(t, gjson.GetBytes(result, "usage.iterations").Exists(), "iterations should be removed")
+	result := normalizeClaudeBody([]byte(input))
+
+	require.False(t, gjson.GetBytes(result, "usage.iterations").Exists(), "iterations removed")
+	require.False(t, gjson.GetBytes(result, "context_management").Exists(), "context_management removed")
+	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
+	assert.True(t, gjson.GetBytes(result, "container").Exists(), "container added")
+	assert.Equal(t, gjson.Null, gjson.GetBytes(result, "container").Type, "container is null")
 	assert.Equal(t, 8, int(gjson.GetBytes(result, "usage.input_tokens").Int()))
 	assert.Equal(t, 16, int(gjson.GetBytes(result, "usage.output_tokens").Int()))
 	assert.Equal(t, "standard", gjson.GetBytes(result, "usage.service_tier").String())
 }
 
-func TestRemoveClaudeIterations_Absent(t *testing.T) {
-	input := `{"usage":{"input_tokens":8,"output_tokens":16,"service_tier":"standard"}}`
-	result := removeClaudeIterations([]byte(input))
-	assert.JSONEq(t, input, string(result))
+func TestNormalizeClaudeBody_AlreadyOfficial(t *testing.T) {
+	input := `{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","container":null,"usage":{"input_tokens":8,"output_tokens":16,"service_tier":"standard","inference_geo":"global"}}`
+
+	result := normalizeClaudeBody([]byte(input))
+
+	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
+	assert.True(t, gjson.GetBytes(result, "container").Exists())
+	assert.Equal(t, gjson.Null, gjson.GetBytes(result, "container").Type)
+	require.False(t, gjson.GetBytes(result, "context_management").Exists())
 }
 
-func TestRemoveClaudeIterationsStr_MessageDelta(t *testing.T) {
-	input := `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":17,"output_tokens":27,"iterations":[{"input_tokens":17,"output_tokens":27,"type":"message"}]},"context_management":{"applied_edits":[]}}`
-	result := removeClaudeIterationsStr(input)
+func TestNormalizeClaudeBody_NoIterationsNoContextMgmt(t *testing.T) {
+	input := `{"usage":{"input_tokens":8,"output_tokens":16,"service_tier":"standard","inference_geo":"not_available"}}`
 
-	require.False(t, gjson.Get(result, "usage.iterations").Exists())
-	assert.Equal(t, "message_delta", gjson.Get(result, "type").String())
+	result := normalizeClaudeBody([]byte(input))
+
+	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
+	assert.True(t, gjson.GetBytes(result, "container").Exists())
+}
+
+func TestNormalizeClaudeStreamEvent_MessageStart(t *testing.T) {
+	input := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_details":null,"usage":{"input_tokens":8,"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}}`
+
+	result := normalizeClaudeStreamEvent(input, "message_start")
+
+	assert.Equal(t, "global", gjson.Get(result, "message.usage.inference_geo").String())
+	require.False(t, gjson.Get(result, "message.context_management").Exists())
+	assert.True(t, gjson.Get(result, "message.container").Exists())
+	assert.Equal(t, gjson.Null, gjson.Get(result, "message.container").Type)
+	assert.Equal(t, "message_start", gjson.Get(result, "type").String())
+}
+
+func TestNormalizeClaudeStreamEvent_MessageStartWithContextMgmt(t *testing.T) {
+	input := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","context_management":{"applied_edits":[]},"usage":{"input_tokens":8,"output_tokens":1,"inference_geo":"not_available"}}}`
+
+	result := normalizeClaudeStreamEvent(input, "message_start")
+
+	require.False(t, gjson.Get(result, "message.context_management").Exists())
+	assert.Equal(t, "global", gjson.Get(result, "message.usage.inference_geo").String())
+	assert.True(t, gjson.Get(result, "message.container").Exists())
+}
+
+func TestNormalizeClaudeStreamEvent_MessageDelta(t *testing.T) {
+	input := `{"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"iterations":[{"input_tokens":8,"output_tokens":16}]},"context_management":{"applied_edits":[]}}`
+
+	result := normalizeClaudeStreamEvent(input, "message_delta")
+
+	require.False(t, gjson.Get(result, "context_management").Exists(), "context_management removed")
+	require.False(t, gjson.Get(result, "usage.iterations").Exists(), "iterations removed")
+	require.False(t, gjson.Get(result, "usage.cache_creation").Exists(), "cache_creation removed from delta")
+	assert.True(t, gjson.Get(result, "delta.container").Exists(), "container added to delta")
+	assert.Equal(t, gjson.Null, gjson.Get(result, "delta.container").Type)
+	assert.Equal(t, "max_tokens", gjson.Get(result, "delta.stop_reason").String())
+	assert.Equal(t, 16, int(gjson.Get(result, "usage.output_tokens").Int()))
+	assert.Equal(t, 0, int(gjson.Get(result, "usage.cache_creation_input_tokens").Int()))
+}
+
+func TestNormalizeClaudeStreamEvent_MessageDeltaClean(t *testing.T) {
+	input := `{"type":"message_delta","delta":{"stop_reason":"end_turn","container":null},"usage":{"input_tokens":8,"output_tokens":16}}`
+
+	result := normalizeClaudeStreamEvent(input, "message_delta")
+
+	assert.True(t, gjson.Get(result, "delta.container").Exists())
+	assert.Equal(t, gjson.Null, gjson.Get(result, "delta.container").Type)
 	assert.Equal(t, "end_turn", gjson.Get(result, "delta.stop_reason").String())
-	assert.Equal(t, 17, int(gjson.Get(result, "usage.input_tokens").Int()))
-	assert.True(t, gjson.Get(result, "context_management").Exists())
 }
 
-func TestRemoveClaudeIterationsStr_NoIterations(t *testing.T) {
-	input := `{"type":"message_delta","usage":{"input_tokens":22,"output_tokens":12}}`
-	result := removeClaudeIterationsStr(input)
+func TestNormalizeClaudeStreamEvent_ContentBlockDelta(t *testing.T) {
+	input := `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`
+
+	result := normalizeClaudeStreamEvent(input, "content_block_delta")
+
+	assert.JSONEq(t, input, result, "content_block_delta should not be modified")
+}
+
+func TestNormalizeClaudeStreamEvent_Ping(t *testing.T) {
+	input := `{"type":"ping"}`
+	result := normalizeClaudeStreamEvent(input, "ping")
 	assert.JSONEq(t, input, result)
 }
 
@@ -72,15 +135,4 @@ func TestDeriveWorkspaceID_DiffersFromOrgID(t *testing.T) {
 	ws1 := deriveWorkspaceID("sk-test-key-123")
 	ws2 := deriveWorkspaceID("sk-test-key-123")
 	assert.Equal(t, ws1, ws2, "same key should produce same workspace ID")
-}
-
-func TestRemoveClaudeIterations_NestedCacheCreation(t *testing.T) {
-	input := `{"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"output_tokens_details":{"thinking_tokens":0},"service_tier":"standard","inference_geo":"global","iterations":[{"input_tokens":8,"output_tokens":16,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}}]}}`
-	result := removeClaudeIterations([]byte(input))
-
-	require.False(t, gjson.GetBytes(result, "usage.iterations").Exists())
-	assert.Equal(t, "standard", gjson.GetBytes(result, "usage.service_tier").String())
-	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
-	assert.True(t, gjson.GetBytes(result, "usage.cache_creation").Exists())
-	assert.True(t, gjson.GetBytes(result, "usage.output_tokens_details").Exists())
 }
