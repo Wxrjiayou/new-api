@@ -313,10 +313,12 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		logger.LogWarn(c, fmt.Sprintf("get channel failed for group %s model %s (retry): %s", selectGroup, info.OriginModelName, err.Error()))
+		return nil, types.NewError(fmt.Errorf("The model is currently unavailable, please try again later"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		logger.LogWarn(c, fmt.Sprintf("no available channel for group %s model %s (retry)", selectGroup, info.OriginModelName))
+		return nil, types.NewError(fmt.Errorf("The model is currently unavailable, please try again later"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
@@ -614,7 +616,7 @@ func RelayTask(c *gin.Context) {
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
 	if taskErr.StatusCode == http.StatusTooManyRequests || taskErr.StatusCode == http.StatusServiceUnavailable {
-		taskErr.Message = "The upstream server is temporarily unavailable, please try again later"
+		taskErr.Message = "Overloaded"
 	}
 	c.JSON(taskErr.StatusCode, taskErr)
 }

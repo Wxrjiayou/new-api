@@ -84,7 +84,7 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 	return claudeErr
 }
 
-const upstreamUnavailableMessage = "The upstream server is temporarily unavailable, please try again later"
+const upstreamUnavailableMessage = "Overloaded"
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	var originalBodyPreview string
