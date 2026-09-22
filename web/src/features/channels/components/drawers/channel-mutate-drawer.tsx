@@ -283,6 +283,8 @@ const SENSITIVE_FORM_FIELDS = [
   'azure_responses_version',
   'force_format',
   'force_claude_format',
+  'normalize_claude_body',
+  'normalize_claude_headers',
   'thinking_to_content',
   'proxy',
   'http_protocol',
@@ -340,6 +342,8 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.system_prompt?.trim() ||
     values.force_format ||
     values.force_claude_format ||
+    values.normalize_claude_body ||
+    values.normalize_claude_headers ||
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
@@ -747,6 +751,8 @@ export function ChannelMutateDrawer({
   const currentHeaderOverride = form.watch('header_override')
   const currentForceFormat = form.watch('force_format')
   const currentForceClaudeFormat = form.watch('force_claude_format')
+  const currentNormalizeClaudeBody = form.watch('normalize_claude_body')
+  const currentNormalizeClaudeHeaders = form.watch('normalize_claude_headers')
   const currentThinkingToContent = form.watch('thinking_to_content')
   const currentPassThroughBodyEnabled = form.watch('pass_through_body_enabled')
   const currentDisableTaskPollingSleep = form.watch(
@@ -1020,6 +1026,8 @@ export function ChannelMutateDrawer({
   const extraSettingsConfigured = Boolean(
     currentForceFormat ||
     currentForceClaudeFormat ||
+    currentNormalizeClaudeBody ||
+    currentNormalizeClaudeHeaders ||
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
     currentDisableTaskPollingSleep ||
@@ -4110,13 +4118,75 @@ export function ChannelMutateDrawer({
                                         </FormLabel>
                                         <FormDescription>
                                           {t(
-                                            'Normalize response to official Anthropic API format (remove Max subscription artifacts)'
+                                            'Master switch: enable both body and header normalization'
                                           )}
                                         </FormDescription>
                                       </div>
                                       <FormControl>
                                         <Switch
                                           checked={field.value}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+                              )}
+
+                              {currentType === 14 && (
+                                <FormField
+                                  control={form.control}
+                                  name='normalize_claude_body'
+                                  render={({ field }) => (
+                                    <FormItem className='flex items-center justify-between px-4 py-3'>
+                                      <div className='space-y-0.5'>
+                                        <FormLabel>
+                                          {t('Normalize Claude Body')}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Remove non-official fields from response body (iterations, context_management, etc.)'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={
+                                            field.value ||
+                                            currentForceClaudeFormat
+                                          }
+                                          disabled={currentForceClaudeFormat}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+                              )}
+
+                              {currentType === 14 && (
+                                <FormField
+                                  control={form.control}
+                                  name='normalize_claude_headers'
+                                  render={({ field }) => (
+                                    <FormItem className='flex items-center justify-between px-4 py-3'>
+                                      <div className='space-y-0.5'>
+                                        <FormLabel>
+                                          {t('Normalize Claude Headers')}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Replace upstream headers with official Anthropic API headers (request-id, org-id, rate-limit)'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={
+                                            field.value ||
+                                            currentForceClaudeFormat
+                                          }
+                                          disabled={currentForceClaudeFormat}
                                           onCheckedChange={field.onChange}
                                         />
                                       </FormControl>

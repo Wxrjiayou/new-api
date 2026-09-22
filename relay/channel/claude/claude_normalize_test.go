@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -135,4 +137,56 @@ func TestDeriveWorkspaceID_DiffersFromOrgID(t *testing.T) {
 	ws1 := deriveWorkspaceID("sk-test-key-123")
 	ws2 := deriveWorkspaceID("sk-test-key-123")
 	assert.Equal(t, ws1, ws2, "same key should produce same workspace ID")
+}
+
+func makeInfoWithToggles(force, body, headers bool) *relaycommon.RelayInfo {
+	info := &relaycommon.RelayInfo{}
+	info.ChannelMeta = &relaycommon.ChannelMeta{
+		ChannelSetting: dto.ChannelSettings{
+			ForceClaudeFormat:      force,
+			NormalizeClaudeBody:    body,
+			NormalizeClaudeHeaders: headers,
+		},
+	}
+	return info
+}
+
+func TestGateFunctions(t *testing.T) {
+	tests := []struct {
+		name       string
+		force      bool
+		body       bool
+		headers    bool
+		wantBody   bool
+		wantHeader bool
+		wantAny    bool
+	}{
+		{"all off", false, false, false, false, false, false},
+		{"body only", false, true, false, true, false, true},
+		{"headers only", false, false, true, false, true, true},
+		{"body+headers", false, true, true, true, true, true},
+		{"force only", true, false, false, true, true, true},
+		{"force+both", true, true, true, true, true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			info := makeInfoWithToggles(tc.force, tc.body, tc.headers)
+			assert.Equal(t, tc.wantBody, shouldNormalizeBody(info))
+			assert.Equal(t, tc.wantHeader, shouldNormalizeHeaders(info))
+			assert.Equal(t, tc.wantAny, shouldApplyClaudeNormalize(info))
+		})
+	}
+}
+
+func TestGateFunctions_NilInfo(t *testing.T) {
+	assert.False(t, shouldNormalizeBody(nil))
+	assert.False(t, shouldNormalizeHeaders(nil))
+	assert.False(t, shouldApplyClaudeNormalize(nil))
+}
+
+func TestGateFunctions_NilChannelMeta(t *testing.T) {
+	info := &relaycommon.RelayInfo{}
+	assert.False(t, shouldNormalizeBody(info))
+	assert.False(t, shouldNormalizeHeaders(info))
+	assert.False(t, shouldApplyClaudeNormalize(info))
 }

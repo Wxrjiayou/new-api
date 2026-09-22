@@ -111,7 +111,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 				data = patchClaudeMessageDeltaUsageData(data, buildMessageDeltaPatchUsage(&claudeResponse, claudeInfo))
 			}
 		}
-		if shouldApplyClaudeNormalize(info) {
+		if shouldNormalizeBody(info) {
 			data = normalizeClaudeStreamEvent(data, claudeResponse.Type)
 		}
 		countClaudeStreamBillableTools(c, info, &claudeResponse)
@@ -252,7 +252,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			return types.NewError(err, types.ErrorCodeBadResponseBody)
 		}
 	case types.RelayFormatClaude:
-		if shouldApplyClaudeNormalize(info) {
+		if shouldNormalizeBody(info) {
 			responseData = normalizeClaudeBody(data)
 		} else {
 			responseData = data
@@ -269,7 +269,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	}
 
-	if shouldApplyClaudeNormalize(info) && info.RelayFormat == types.RelayFormatClaude {
+	if shouldNormalizeHeaders(info) && info.RelayFormat == types.RelayFormatClaude {
 		writeClaudeNormalizedResponse(c, httpResp, responseData, info)
 	} else {
 		service.IOCopyBytesGracefully(c, httpResp, responseData)

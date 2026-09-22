@@ -162,8 +162,22 @@ func writeClaudeNormalizedResponse(c *gin.Context, httpResp *http.Response, data
 	c.Writer.Flush()
 }
 
+func shouldNormalizeBody(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	return info.ChannelSetting.NormalizeClaudeBody || info.ChannelSetting.ForceClaudeFormat
+}
+
+func shouldNormalizeHeaders(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	return info.ChannelSetting.NormalizeClaudeHeaders || info.ChannelSetting.ForceClaudeFormat
+}
+
 func shouldApplyClaudeNormalize(info *relaycommon.RelayInfo) bool {
-	return info != nil && info.ChannelMeta != nil && info.ChannelSetting.ForceClaudeFormat
+	return shouldNormalizeBody(info) || shouldNormalizeHeaders(info)
 }
 
 func IsStreamHeaderAllowed(name string) bool {

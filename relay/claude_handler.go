@@ -212,9 +212,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			upstreamStatus := httpResp.StatusCode
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-			if info.ChannelSetting.ForceClaudeFormat {
-				newAPIError = claude.NormalizeClaudeError(newAPIError, upstreamStatus)
-			}
+			newAPIError = claude.NormalizeClaudeError(newAPIError, upstreamStatus)
 			return newAPIError
 		}
 	}
