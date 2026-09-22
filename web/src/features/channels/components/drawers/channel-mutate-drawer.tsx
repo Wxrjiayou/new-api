@@ -296,6 +296,8 @@ const SENSITIVE_FORM_FIELDS = [
   'azure_responses_version',
   'force_format',
   'force_claude_format',
+  'normalize_claude_body',
+  'normalize_claude_headers',
   'thinking_to_content',
   'proxy',
   'http_protocol',
