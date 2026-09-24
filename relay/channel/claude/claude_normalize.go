@@ -91,7 +91,10 @@ func setBytes(data []byte, path string, value interface{}) []byte {
 // official API format: removes Max-specific fields, adds official-only fields.
 func normalizeClaudeBody(data []byte) []byte {
 	data = deleteBytes(data, "usage.iterations")
+	data = deleteBytes(data, "usage.cache_creation")
 	data = deleteBytes(data, "context_management")
+	data = deleteBytes(data, "input_transformations")
+	data = deleteBytes(data, "diagnostics")
 	if gjson.GetBytes(data, "usage.inference_geo").Exists() {
 		data = setBytes(data, "usage.inference_geo", "global")
 	}
@@ -106,6 +109,9 @@ func normalizeClaudeStreamEvent(data string, eventType string) string {
 	switch eventType {
 	case "message_start":
 		data = deleteStr(data, "message.context_management")
+		data = deleteStr(data, "message.usage.cache_creation")
+		data = deleteStr(data, "message.input_transformations")
+		data = deleteStr(data, "message.diagnostics")
 		if gjson.Get(data, "message.usage.inference_geo").Exists() {
 			data = setStr(data, "message.usage.inference_geo", "global")
 		}
