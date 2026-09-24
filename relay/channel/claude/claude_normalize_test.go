@@ -12,16 +12,20 @@ import (
 )
 
 func TestNormalizeClaudeBody_Full(t *testing.T) {
-	input := `{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[{"type":"text","text":"Hi"}],"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"service_tier":"standard","inference_geo":"not_available","iterations":[{"input_tokens":8,"output_tokens":16}]},"context_management":{"applied_edits":[]}}`
+	input := `{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[{"type":"text","text":"Hi"}],"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"service_tier":"standard","inference_geo":"not_available","iterations":[{"input_tokens":8,"output_tokens":16}]},"input_transformations":[],"diagnostics":null,"context_management":{"applied_edits":[]}}`
 
 	result := normalizeClaudeBody([]byte(input))
 
 	require.False(t, gjson.GetBytes(result, "usage.iterations").Exists(), "iterations removed")
+	require.False(t, gjson.GetBytes(result, "usage.cache_creation").Exists(), "usage.cache_creation removed")
 	require.False(t, gjson.GetBytes(result, "context_management").Exists(), "context_management removed")
+	require.False(t, gjson.GetBytes(result, "input_transformations").Exists(), "input_transformations removed")
+	require.False(t, gjson.GetBytes(result, "diagnostics").Exists(), "diagnostics removed")
 	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
 	assert.True(t, gjson.GetBytes(result, "container").Exists(), "container added")
 	assert.Equal(t, gjson.Null, gjson.GetBytes(result, "container").Type, "container is null")
 	assert.Equal(t, 8, int(gjson.GetBytes(result, "usage.input_tokens").Int()))
+	assert.Equal(t, 0, int(gjson.GetBytes(result, "usage.cache_creation_input_tokens").Int()), "flat cache field preserved")
 	assert.Equal(t, 16, int(gjson.GetBytes(result, "usage.output_tokens").Int()))
 	assert.Equal(t, "standard", gjson.GetBytes(result, "usage.service_tier").String())
 }
@@ -47,12 +51,16 @@ func TestNormalizeClaudeBody_NoIterationsNoContextMgmt(t *testing.T) {
 }
 
 func TestNormalizeClaudeStreamEvent_MessageStart(t *testing.T) {
-	input := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_details":null,"usage":{"input_tokens":8,"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}}`
+	input := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_details":null,"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"},"input_transformations":[],"diagnostics":null}}`
 
 	result := normalizeClaudeStreamEvent(input, "message_start")
 
 	assert.Equal(t, "global", gjson.Get(result, "message.usage.inference_geo").String())
 	require.False(t, gjson.Get(result, "message.context_management").Exists())
+	require.False(t, gjson.Get(result, "message.usage.cache_creation").Exists(), "cache_creation removed")
+	require.False(t, gjson.Get(result, "message.input_transformations").Exists(), "input_transformations removed")
+	require.False(t, gjson.Get(result, "message.diagnostics").Exists(), "diagnostics removed")
+	assert.Equal(t, 0, int(gjson.Get(result, "message.usage.cache_creation_input_tokens").Int()), "flat cache field preserved")
 	assert.True(t, gjson.Get(result, "message.container").Exists())
 	assert.Equal(t, gjson.Null, gjson.Get(result, "message.container").Type)
 	assert.Equal(t, "message_start", gjson.Get(result, "type").String())
