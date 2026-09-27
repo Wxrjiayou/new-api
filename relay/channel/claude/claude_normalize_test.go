@@ -115,16 +115,16 @@ func TestNormalizeClaudeStreamEvent_Ping(t *testing.T) {
 	assert.JSONEq(t, input, result)
 }
 
-func TestGenBase58RequestID(t *testing.T) {
-	id := genBase58RequestID()
-	require.True(t, strings.HasPrefix(id, "req_"), "should start with req_")
-	assert.Len(t, id, 28, "req_ (4) + 24 chars = 28")
+func TestGenRequestID(t *testing.T) {
+	id := genRequestID()
+	require.True(t, strings.HasPrefix(id, "req_01"), "should start with req_01")
+	assert.Len(t, id, 28, "req_01 (6) + 7 timestamp + 15 random = 28")
 
 	for _, c := range id[4:] {
-		assert.True(t, strings.ContainsRune(base58Alphabet, c), "char %c should be in base58 alphabet", c)
+		assert.True(t, strings.ContainsRune(base62Chars, c), "char %c should be in base62 alphabet", c)
 	}
 
-	id2 := genBase58RequestID()
+	id2 := genRequestID()
 	assert.NotEqual(t, id, id2, "two IDs should differ")
 }
 
@@ -137,14 +137,42 @@ func TestDeriveOrgID_Stable(t *testing.T) {
 	assert.NotEqual(t, id1, id3, "different keys should produce different org IDs")
 }
 
-func TestDeriveWorkspaceID_DiffersFromOrgID(t *testing.T) {
-	orgID := deriveOrgID("sk-test-key-123")
+func TestDeriveOrgID_UUIDv4Format(t *testing.T) {
+	id := deriveOrgID("sk-test-key-123")
+	parts := strings.Split(id, "-")
+	require.Len(t, parts, 5, "UUID has 5 parts")
+	assert.Len(t, parts[0], 8)
+	assert.Len(t, parts[1], 4)
+	assert.Len(t, parts[2], 4)
+	assert.Len(t, parts[3], 4)
+	assert.Len(t, parts[4], 12)
+	assert.True(t, strings.HasPrefix(parts[2], "4"), "version nibble should be 4, got %s", parts[2])
+	firstVariantChar := parts[3][0]
+	assert.True(t, firstVariantChar == '8' || firstVariantChar == '9' || firstVariantChar == 'a' || firstVariantChar == 'b',
+		"variant nibble should be 8/9/a/b, got %c", firstVariantChar)
+}
+
+func TestDeriveWorkspaceID_Format(t *testing.T) {
 	wsID := deriveWorkspaceID("sk-test-key-123")
-	assert.NotEqual(t, orgID, wsID, "workspace ID should differ from org ID")
+	require.True(t, strings.HasPrefix(wsID, "wrkspc_01"), "should start with wrkspc_01")
+	assert.Len(t, wsID, 31, "wrkspc_01 (9) + 22 chars = 31")
+
+	for _, c := range wsID[9:] {
+		assert.True(t, strings.ContainsRune(base62Chars, c), "char %c should be in base62 alphabet", c)
+	}
 
 	ws1 := deriveWorkspaceID("sk-test-key-123")
 	ws2 := deriveWorkspaceID("sk-test-key-123")
 	assert.Equal(t, ws1, ws2, "same key should produce same workspace ID")
+
+	ws3 := deriveWorkspaceID("sk-different-key")
+	assert.NotEqual(t, ws1, ws3, "different keys should produce different workspace IDs")
+}
+
+func TestDeriveWorkspaceID_DiffersFromOrgID(t *testing.T) {
+	orgID := deriveOrgID("sk-test-key-123")
+	wsID := deriveWorkspaceID("sk-test-key-123")
+	assert.NotEqual(t, orgID, wsID, "workspace ID should differ from org ID")
 }
 
 func makeInfoWithToggles(force, body, headers bool) *relaycommon.RelayInfo {
