@@ -4,8 +4,18 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
+
+func IsClaudeUpstream(apiType int) bool {
+	switch apiType {
+	case constant.APITypeAnthropic, constant.APITypeAws:
+		return true
+	default:
+		return false
+	}
+}
 
 type claudeErrorAction int
 
@@ -49,6 +59,20 @@ var abKeywords = []string{
 	"may not be enabled for your organization",
 	"restricted by your organization",
 	"all upstreams failed",
+	"can't use claude code",
+	"only authorized for use with claude code",
+	"stream ended without receiving any events",
+	"previous_message_id",
+	"when `thread` is set",
+	"organization has been disabled",
+	"organization has disabled",
+	"account has been disabled",
+	"account is on hold",
+	"oauth token",
+	"oauth authentication",
+	"please run /login",
+	"claude code",
+	"x-anthropic-billing-header",
 }
 
 var abRegexes = []*regexp.Regexp{
@@ -78,6 +102,13 @@ var cKeywordsNon400 = []string{
 var d2Keywords = []string{
 	"stopped locally before forwarding",
 	"refusal guard",
+}
+
+var bedrockDeadKeywords = []string{
+	"deployment request could not be completed",
+	"independently manages customer access",
+	"555420",
+	"access to bedrock models is not allowed",
 }
 
 var eKeywords400 = []string{
@@ -125,6 +156,12 @@ func classifyClaudeError(message string, statusCode int) claudeErrorAction {
 	}
 
 	for _, kw := range d2Keywords {
+		if strings.Contains(lower, kw) {
+			return actionReplaceOverloaded
+		}
+	}
+
+	for _, kw := range bedrockDeadKeywords {
 		if strings.Contains(lower, kw) {
 			return actionReplaceOverloaded
 		}

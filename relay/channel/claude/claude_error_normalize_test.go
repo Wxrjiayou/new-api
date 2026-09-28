@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -228,4 +229,62 @@ func TestNormalizeClaudeError_PreservesOriginalStatusForHTML(t *testing.T) {
 	err := makeAPIError("<!doctype html><html>503</html>", 503)
 	result := NormalizeClaudeError(err, 503)
 	assert.Equal(t, 503, result.StatusCode)
+}
+
+func TestClassifyClaudeError_MAXThirdPartyKeywords(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		status  int
+	}{
+		{"can't use claude code", "You can't use claude code with this account", 403},
+		{"only authorized for claude code", "This key is only authorized for use with claude code", 400},
+		{"stream ended no events", "stream ended without receiving any events", 400},
+		{"previous_message_id", "Invalid previous_message_id in request", 400},
+		{"when thread is set", "model is not supported when `thread` is set", 400},
+		{"organization disabled", "Your organization has been disabled", 403},
+		{"organization has disabled", "Your organization has disabled API access", 403},
+		{"account disabled", "Your account has been disabled", 403},
+		{"account on hold", "Your account is on hold", 403},
+		{"oauth token", "Invalid oauth token provided", 401},
+		{"oauth authentication", "oauth authentication is not supported", 400},
+		{"please run /login", "Session expired, please run /login", 401},
+		{"claude code generic", "This endpoint is reserved for claude code clients", 403},
+		{"billing header", "Unknown header x-anthropic-billing-header", 400},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, actionReplaceOverloaded, classifyClaudeError(tt.message, tt.status))
+		})
+	}
+}
+
+func TestClassifyClaudeError_BedrockDeadUpstream(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		status  int
+	}{
+		{"deployment failed", "The deployment request could not be completed", 400},
+		{"manages customer access", "AWS independently manages customer access to this service", 403},
+		{"error code 555420", "Request failed with error code 555420", 500},
+		{"bedrock not allowed", "access to bedrock models is not allowed for this account", 403},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, actionReplaceOverloaded, classifyClaudeError(tt.message, tt.status))
+		})
+	}
+}
+
+func TestClassifyClaudeError_ClaudeCodeWhitelistPriority(t *testing.T) {
+	assert.Equal(t, actionPassthrough, classifyClaudeError("input is too long for claude code model", 400))
+	assert.Equal(t, actionPassthrough, classifyClaudeError("token limit exceeded in claude code session", 400))
+}
+
+func TestIsClaudeUpstream(t *testing.T) {
+	assert.True(t, IsClaudeUpstream(constant.APITypeAnthropic))
+	assert.True(t, IsClaudeUpstream(constant.APITypeAws))
+	assert.False(t, IsClaudeUpstream(constant.APITypeOpenAI))
+	assert.False(t, IsClaudeUpstream(0))
 }

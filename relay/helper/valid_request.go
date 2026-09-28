@@ -19,6 +19,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func sanitizeUnmarshalError(err error) error {
+	var ute *json.UnmarshalTypeError
+	if errors.As(err, &ute) {
+		if ute.Field != "" {
+			return fmt.Errorf("invalid value for field %s", ute.Field)
+		}
+		return fmt.Errorf("invalid request body")
+	}
+	return err
+}
+
 func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dto.Request, err error) {
 	relayMode := relayconstant.Path2RelayMode(c.Request.URL.Path)
 
@@ -62,7 +73,7 @@ func GetAndValidAudioRequest(c *gin.Context, relayMode int) (*dto.AudioRequest, 
 	audioRequest := &dto.AudioRequest{}
 	err := common.UnmarshalBodyReusable(c, audioRequest)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	switch relayMode {
 	case relayconstant.RelayModeAudioSpeech:
@@ -85,7 +96,7 @@ func GetAndValidateRerankRequest(c *gin.Context) (*dto.RerankRequest, error) {
 	err := common.UnmarshalBodyReusable(c, &rerankRequest)
 	if err != nil {
 		logger.LogError(c, fmt.Sprintf("getAndValidateTextRequest failed: %s", err.Error()))
-		return nil, types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+		return nil, types.NewError(sanitizeUnmarshalError(err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
 	if rerankRequest.Query == "" {
@@ -102,7 +113,7 @@ func GetAndValidateEmbeddingRequest(c *gin.Context, relayMode int) (*dto.Embeddi
 	err := common.UnmarshalBodyReusable(c, &embeddingRequest)
 	if err != nil {
 		logger.LogError(c, fmt.Sprintf("getAndValidateTextRequest failed: %s", err.Error()))
-		return nil, types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+		return nil, types.NewError(sanitizeUnmarshalError(err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
 	if embeddingRequest.Input == nil {
@@ -136,7 +147,7 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 	request := &dto.OpenAIResponsesRequest{}
 	err := common.UnmarshalBodyReusable(c, request)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	if request.Model == "" {
 		return nil, errors.New("model is required")
@@ -153,7 +164,7 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 func GetAndValidateAlphaSearchRequest(c *gin.Context) (*dto.AlphaSearchRequest, error) {
 	request := &dto.AlphaSearchRequest{}
 	if err := common.UnmarshalBodyReusable(c, request); err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	if request.Model == "" {
 		return nil, errors.New("model is required")
@@ -173,7 +184,7 @@ func GetAndValidateAlphaSearchRequest(c *gin.Context) (*dto.AlphaSearchRequest, 
 func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIResponsesCompactionRequest, error) {
 	request := &dto.OpenAIResponsesCompactionRequest{}
 	if err := common.UnmarshalBodyReusable(c, request); err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	if request.Model == "" {
 		return nil, errors.New("model is required")
@@ -239,7 +250,7 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 	default:
 		err := common.UnmarshalBodyReusable(c, imageRequest)
 		if err != nil {
-			return nil, err
+			return nil, sanitizeUnmarshalError(err)
 		}
 
 		if imageRequest.Model == "" {
@@ -292,7 +303,7 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 	textRequest = &dto.ClaudeRequest{}
 	err = common.UnmarshalBodyReusable(c, textRequest)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	if textRequest.Messages == nil || len(textRequest.Messages) == 0 {
 		return nil, errors.New("field messages is required")
@@ -315,7 +326,7 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 	textRequest := &dto.GeneralOpenAIRequest{}
 	err := common.UnmarshalBodyReusable(c, textRequest)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 
 	if relayMode == relayconstant.RelayModeModerations && textRequest.Model == "" {
@@ -376,7 +387,7 @@ func GetAndValidateGeminiRequest(c *gin.Context) (*dto.GeminiChatRequest, error)
 	request := &dto.GeminiChatRequest{}
 	err := common.UnmarshalBodyReusable(c, request)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	if len(request.Contents) == 0 && len(request.Requests) == 0 {
 		return nil, errors.New("contents is required")
@@ -396,7 +407,7 @@ func GetAndValidateGeminiEmbeddingRequest(c *gin.Context) (*dto.GeminiEmbeddingR
 	request := &dto.GeminiEmbeddingRequest{}
 	err := common.UnmarshalBodyReusable(c, request)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	return request, nil
 }
@@ -405,7 +416,7 @@ func GetAndValidateGeminiBatchEmbeddingRequest(c *gin.Context) (*dto.GeminiBatch
 	request := &dto.GeminiBatchEmbeddingRequest{}
 	err := common.UnmarshalBodyReusable(c, request)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeUnmarshalError(err)
 	}
 	return request, nil
 }

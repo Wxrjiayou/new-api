@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	claude "github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -64,9 +65,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		httpResp = resp.(*http.Response)
 
 		if httpResp.StatusCode != http.StatusOK {
+			upstreamStatus := httpResp.StatusCode
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
 			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+			if claude.IsClaudeUpstream(info.ApiType) {
+				newAPIError = claude.NormalizeClaudeError(newAPIError, upstreamStatus)
+			}
 			return newAPIError
 		}
 	}

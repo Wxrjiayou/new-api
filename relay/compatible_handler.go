@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	claude "github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -161,17 +162,22 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		httpResp = resp.(*http.Response)
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		if httpResp.StatusCode != http.StatusOK {
+			upstreamStatus := httpResp.StatusCode
 			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+			if claude.IsClaudeUpstream(info.ApiType) {
+				newApiErr = claude.NormalizeClaudeError(newApiErr, upstreamStatus)
+			}
 			return newApiErr
 		}
 	}
 
 	usage, newApiErr := adaptor.DoResponse(c, httpResp, info)
 	if newApiErr != nil {
-		// reset status code 重置状态码
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
+		if claude.IsClaudeUpstream(info.ApiType) {
+			newApiErr = claude.NormalizeClaudeError(newApiErr, newApiErr.StatusCode)
+		}
 		return newApiErr
 	}
 
