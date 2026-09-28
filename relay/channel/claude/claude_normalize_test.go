@@ -21,6 +21,7 @@ func TestNormalizeClaudeBody_Full(t *testing.T) {
 	require.False(t, gjson.GetBytes(result, "context_management").Exists(), "context_management removed")
 	require.False(t, gjson.GetBytes(result, "input_transformations").Exists(), "input_transformations removed")
 	require.False(t, gjson.GetBytes(result, "diagnostics").Exists(), "diagnostics removed")
+	require.False(t, gjson.GetBytes(result, "stop_details").Exists(), "stop_details removed")
 	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
 	assert.True(t, gjson.GetBytes(result, "container").Exists(), "container added")
 	assert.Equal(t, gjson.Null, gjson.GetBytes(result, "container").Type, "container is null")
@@ -60,6 +61,7 @@ func TestNormalizeClaudeStreamEvent_MessageStart(t *testing.T) {
 	require.False(t, gjson.Get(result, "message.usage.cache_creation").Exists(), "cache_creation removed")
 	require.False(t, gjson.Get(result, "message.input_transformations").Exists(), "input_transformations removed")
 	require.False(t, gjson.Get(result, "message.diagnostics").Exists(), "diagnostics removed")
+	require.False(t, gjson.Get(result, "message.stop_details").Exists(), "message.stop_details removed")
 	assert.Equal(t, 0, int(gjson.Get(result, "message.usage.cache_creation_input_tokens").Int()), "flat cache field preserved")
 	assert.True(t, gjson.Get(result, "message.container").Exists())
 	assert.Equal(t, gjson.Null, gjson.Get(result, "message.container").Type)
@@ -84,6 +86,7 @@ func TestNormalizeClaudeStreamEvent_MessageDelta(t *testing.T) {
 	require.False(t, gjson.Get(result, "context_management").Exists(), "context_management removed")
 	require.False(t, gjson.Get(result, "usage.iterations").Exists(), "iterations removed")
 	require.False(t, gjson.Get(result, "usage.cache_creation").Exists(), "cache_creation removed from delta")
+	require.False(t, gjson.Get(result, "delta.stop_details").Exists(), "delta.stop_details removed")
 	assert.True(t, gjson.Get(result, "delta.container").Exists(), "container added to delta")
 	assert.Equal(t, gjson.Null, gjson.Get(result, "delta.container").Type)
 	assert.Equal(t, "max_tokens", gjson.Get(result, "delta.stop_reason").String())
@@ -225,4 +228,65 @@ func TestGateFunctions_NilChannelMeta(t *testing.T) {
 	assert.False(t, shouldNormalizeBody(info))
 	assert.False(t, shouldNormalizeHeaders(info))
 	assert.False(t, shouldApplyClaudeNormalize(info))
+}
+
+func TestNormalizeClaudeStreamEvent_ContentBlockDeltaThinking(t *testing.T) {
+	input := `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hello","estimated_tokens":null}}`
+
+	result := normalizeClaudeStreamEvent(input, "content_block_delta")
+
+	require.False(t, gjson.Get(result, "delta.estimated_tokens").Exists(), "estimated_tokens removed")
+	assert.Equal(t, "thinking_delta", gjson.Get(result, "delta.type").String())
+	assert.Equal(t, "hello", gjson.Get(result, "delta.thinking").String())
+}
+
+func TestNormalizeClaudeStreamEvent_SignatureDeltaStripped(t *testing.T) {
+	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
+	input := `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + maxSig + `"}}`
+
+	result := normalizeClaudeStreamEvent(input, "content_block_delta")
+
+	resultSig := gjson.Get(result, "delta.signature").String()
+	assert.True(t, len(resultSig) < len(maxSig), "signature should be shorter after stripping Max fields")
+	assert.NotEqual(t, maxSig, resultSig)
+}
+
+func TestNormalizeClaudeBody_ThinkingSignatureStripped(t *testing.T) {
+	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
+	input := `{"model":"claude-opus-4-6","content":[{"type":"thinking","thinking":"5","signature":"` + maxSig + `"},{"type":"text","text":"hello"}],"usage":{"input_tokens":8,"output_tokens":16}}`
+
+	result := normalizeClaudeBody([]byte(input))
+
+	resultSig := gjson.GetBytes(result, "content.0.signature").String()
+	assert.True(t, len(resultSig) < len(maxSig), "signature should be shorter after stripping")
+	assert.Equal(t, "text", gjson.GetBytes(result, "content.1.type").String(), "text block preserved")
+}
+
+func TestStripMaxSignatureFields(t *testing.T) {
+	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
+	cleanSig := "EvQBCpABCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ0MmRlNzljNy01ZmJiLTRlYTYtYmRjNC00MTM4MTYyYjQ1ZmKoAdrn5tUGEgyaDNNIiL5PnAcPDNYaDOUWFUe/AmGno5GCsyIw7RyX5yOqm9/CZov4c18VVYznpjgiLtXGbRXi4E509I4na1lsSmi+Weq2vVVMfwMBKhGkgdfq3DY9FwSQWWGKpa/YXBgB"
+
+	t.Run("strips Max fields from real signature", func(t *testing.T) {
+		result := stripMaxSignatureFields(maxSig)
+		assert.NotEqual(t, maxSig, result, "should be modified")
+		assert.True(t, len(result) < len(maxSig), "should be shorter (was %d, got %d)", len(maxSig), len(result))
+	})
+
+	t.Run("clean signature unchanged", func(t *testing.T) {
+		result := stripMaxSignatureFields(cleanSig)
+		assert.Equal(t, cleanSig, result, "already-clean signature should not change")
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		assert.Equal(t, "", stripMaxSignatureFields(""))
+	})
+
+	t.Run("invalid base64", func(t *testing.T) {
+		assert.Equal(t, "not-base64!!!", stripMaxSignatureFields("not-base64!!!"))
+	})
+
+	t.Run("valid base64 non-protobuf", func(t *testing.T) {
+		sig := "AQIDBA=="
+		assert.Equal(t, sig, stripMaxSignatureFields(sig))
+	})
 }
