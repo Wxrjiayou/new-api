@@ -80,6 +80,10 @@ func ExtendWriteDeadline(c *gin.Context) {
 	_ = http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(streamWriteTimeout))
 }
 
+// clientGoneUsageGrace bounds how long a stream keeps reading the upstream after
+// the client disconnects, waiting for the first event that carries usage.
+var clientGoneUsageGrace = 3 * time.Second
+
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
 
 	if resp == nil || dataHandler == nil {
@@ -211,6 +215,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}
 
 	dataChan := make(chan string, 10)
+	firstDataHandled := make(chan struct{})
+	var firstDataOnce sync.Once
 
 	wg.Add(1)
 	gopool.Go(func() {
@@ -231,6 +237,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				ExtendWriteDeadline(c)
 				dataHandler(data, sr)
 			}()
+			firstDataOnce.Do(func() { close(firstDataHandled) })
 			if sr.IsStopped() {
 				return
 			}
@@ -310,9 +317,17 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	case <-stopChan:
 		// EndReason already set by the goroutine that triggered stopChan
 	case <-c.Request.Context().Done():
-		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
+		// 客户端断开：cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
 		// 避免为已放弃的请求继续消费上游 token。
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		// 上游一旦开始处理就会计费，而首个事件（Claude 的 message_start）才带有
+		// 真实的输入用量。尚未处理任何事件时，短暂继续读取上游以拿到用量；
+		// 写给客户端的数据会因请求已结束而被丢弃。
+		select {
+		case <-firstDataHandled:
+		case <-stopChan:
+		case <-time.After(clientGoneUsageGrace):
+		}
 	}
 
 	cleanup()

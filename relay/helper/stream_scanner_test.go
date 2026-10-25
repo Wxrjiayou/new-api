@@ -336,8 +336,9 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 
 	cancel()
 
-	// The handler must return without any further upstream input: cleanup
-	// closes resp.Body, which unblocks the scanner goroutine.
+	// The first event was already handled, so there is no usage grace: the
+	// handler must return without any further upstream input. cleanup closes
+	// resp.Body, which unblocks the scanner goroutine.
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -356,6 +357,62 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 	body := recorder.Body.String()
 	assert.Contains(t, body, "first")
 	assert.NotContains(t, body, "second")
+}
+
+func TestStreamScannerHandler_ClientCancelBeforeFirstEventReadsUsage(t *testing.T) {
+	previousGrace := clientGoneUsageGrace
+	clientGoneUsageGrace = 200 * time.Millisecond
+	t.Cleanup(func() { clientGoneUsageGrace = previousGrace })
+
+	for _, tc := range []struct {
+		name          string
+		upstreamSends bool
+		wantHandled   int64
+	}{
+		{name: "first event within grace is parsed", upstreamSends: true, wantHandled: 1},
+		{name: "silent upstream stops after grace", upstreamSends: false, wantHandled: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pr, pw := io.Pipe()
+			t.Cleanup(func() {
+				_ = pr.Close()
+				_ = pw.Close()
+			})
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil).WithContext(ctx)
+			info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+			var handled atomic.Int64
+			done := make(chan struct{})
+			go func() {
+				StreamScannerHandler(c, &http.Response{Body: pr}, info, func(data string, sr *StreamResult) {
+					handled.Add(1)
+					_ = StringData(c, data)
+				})
+				close(done)
+			}()
+
+			cancel()
+			if tc.upstreamSends {
+				_, err := fmt.Fprint(pw, "data: message_start\n")
+				require.NoError(t, err)
+			}
+
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("handler did not return after the grace period")
+			}
+			assert.Equal(t, tc.wantHandled, handled.Load())
+			assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+			assert.NotContains(t, recorder.Body.String(), "message_start", "nothing is written to a gone client")
+			_, err := fmt.Fprint(pw, "data: later\n")
+			require.ErrorIs(t, err, io.ErrClosedPipe, "upstream body is closed after the grace read")
+		})
+	}
 }
 
 // ---------- Ping tests ----------
