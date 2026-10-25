@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func stopReasonClaude2OpenAI(reason string) string {
@@ -350,15 +351,26 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		Usage:        &dto.Usage{},
 	}
 	var err *types.NewAPIError
+	openBlock := -1
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if err != nil {
 			sr.Stop(err)
+			return
+		}
+		switch gjson.Get(data, "type").String() {
+		case "content_block_start":
+			openBlock = int(gjson.Get(data, "index").Int())
+		case "content_block_stop":
+			openBlock = -1
 		}
 	})
 	info.StreamStatus.RequireTerminal()
 	if err == nil {
 		HandleStreamFinalResponse(c, info, claudeInfo)
+		if info.RelayFormat == types.RelayFormatClaude {
+			closeTruncatedClaudeStream(c, info, claudeInfo, openBlock)
+		}
 		return claudeInfo.Usage, nil
 	}
 	// Before any output reached the client the request can still move to
@@ -382,6 +394,35 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		}
 	}
 	return claudeInfo.Usage, nil
+}
+
+// closeTruncatedClaudeStream ends a Claude stream that the upstream cut off
+// after output started: without message_stop, clients such as Claude Code
+// treat the reply as failed. Idle timeouts and client disconnects are left alone.
+func closeTruncatedClaudeStream(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, openBlock int) {
+	if info.StreamStatus.ResponseOutcome() == string(relaycommon.ResponseOutcomeCompleted) {
+		return
+	}
+	endReason := info.StreamStatus.EndReason
+	if endReason != relaycommon.StreamEndReasonEOF && endReason != relaycommon.StreamEndReasonScannerErr {
+		return
+	}
+	if !common.ResponseBodyStarted(c) {
+		return
+	}
+	logger.LogWarn(c, common.LogText("claude stream ended without message_stop (%s), sending terminal events", endReason))
+	helper.ExtendWriteDeadline(c)
+	if openBlock >= 0 {
+		helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "content_block_stop"}, fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, openBlock))
+	}
+	if !claudeInfo.Done {
+		delta := fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":%d}}`, claudeInfo.Usage.CompletionTokens)
+		if shouldNormalizeBody(info) {
+			delta = normalizeClaudeStreamEvent(delta, "message_delta")
+		}
+		helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_delta"}, delta)
+	}
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_stop"}, `{"type":"message_stop"}`)
 }
 
 func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, httpResp *http.Response, data []byte) *types.NewAPIError {

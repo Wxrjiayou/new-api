@@ -553,3 +553,61 @@ func TestClaudeStreamHandlerMidStreamError(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeStreamHandlerClosesTruncatedStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 5
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	start := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-opus-4-8\",\"usage\":{\"input_tokens\":1000,\"output_tokens\":1}}}\n\n"
+	blockStart := "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+	text := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello world\"}}\n\n"
+	blockStop := "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+	delta := "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
+	stop := "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	for _, tc := range []struct {
+		name                       string
+		body                       string
+		wantBlockStops, wantDeltas int
+		wantStops                  int
+		wantEndTurn                bool
+	}{
+		{name: "cut inside a content block", body: start + blockStart + text, wantBlockStops: 1, wantDeltas: 1, wantStops: 1, wantEndTurn: true},
+		{name: "cut after message_delta", body: start + blockStart + text + blockStop + delta, wantBlockStops: 1, wantDeltas: 1, wantStops: 1},
+		{name: "complete stream is unchanged", body: start + blockStart + text + blockStop + delta + stop, wantBlockStops: 1, wantDeltas: 1, wantStops: 1},
+		{name: "no output gets nothing", body: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			info := &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatClaude,
+				ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"},
+			}
+			info.SetEstimatePromptTokens(1200)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			}
+
+			_, apiErr := ClaudeStreamHandler(c, resp, info)
+
+			require.Nil(t, apiErr)
+			body := recorder.Body.String()
+			assert.Equal(t, tc.wantBlockStops, strings.Count(body, "event: content_block_stop"))
+			assert.Equal(t, tc.wantDeltas, strings.Count(body, "event: message_delta"))
+			assert.Equal(t, tc.wantStops, strings.Count(body, "event: message_stop"))
+			if tc.wantStops > 0 {
+				assert.True(t, strings.HasSuffix(strings.TrimSpace(body), `{"type":"message_stop"}`), "message_stop is the last event")
+			}
+			if tc.wantEndTurn {
+				assert.Contains(t, body, `"stop_reason":"end_turn"`)
+				assert.NotContains(t, body, `"output_tokens":0}`, "synthesized delta carries the output estimate")
+			}
+		})
+	}
+}
