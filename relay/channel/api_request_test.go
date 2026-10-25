@@ -2,11 +2,18 @@ package channel
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	appconstant "github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,5 +222,87 @@ func TestToWebSocketURL(t *testing.T) {
 		"ws://127.0.0.1:3000/backend-api/codex/responses": "ws://127.0.0.1:3000/backend-api/codex/responses",
 	} {
 		assert.Equal(t, want, toWebSocketURL(input), input)
+	}
+}
+
+func TestDoRequestFirstByteTimeout(t *testing.T) {
+	previousTimeout, previousBudget := common.RelayFirstByteTimeout, common.RelayFirstByteBudget
+	common.RelayFirstByteTimeout, common.RelayFirstByteBudget = 1, 1200
+	t.Cleanup(func() { common.RelayFirstByteTimeout, common.RelayFirstByteBudget = previousTimeout, previousBudget })
+	service.InitHttpClient()
+	// Slow handlers wait on release so the test server can shut down even if
+	// the transport keeps the cancelled connection open.
+	release := make(chan struct{})
+	waitForRelease := func(r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}
+
+	for _, tc := range []struct {
+		name          string
+		handler       http.HandlerFunc
+		budgetUsed    time.Duration
+		wantBody      string
+		wantSkipRetry bool
+	}{
+		{name: "fast response keeps the peeked byte", handler: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "data: ok\n\n")
+		}, wantBody: "data: ok\n\n"},
+		{name: "no headers within timeout", handler: func(w http.ResponseWriter, r *http.Request) {
+			waitForRelease(r)
+		}},
+		{name: "headers but no body within timeout", handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			waitForRelease(r)
+		}},
+		{name: "remaining budget caps the attempt", budgetUsed: 1200*time.Second - time.Second, handler: func(w http.ResponseWriter, r *http.Request) {
+			waitForRelease(r)
+		}},
+		{name: "exhausted budget sends nothing", budgetUsed: 1201 * time.Second, handler: func(w http.ResponseWriter, r *http.Request) {
+			t.Error("no upstream attempt is allowed once the budget is used")
+		}, wantSkipRetry: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.budgetUsed > 0 {
+				common.RelayFirstByteTimeout = 600
+				t.Cleanup(func() { common.RelayFirstByteTimeout = 1 })
+			}
+			upstream := httptest.NewServer(tc.handler)
+			defer upstream.Close()
+			defer func() {
+				select {
+				case release <- struct{}{}:
+				default:
+				}
+			}()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			if tc.budgetUsed > 0 {
+				common.SetContextKey(c, appconstant.ContextKeyFirstByteBudgetStart, time.Now().Add(-tc.budgetUsed))
+			}
+			req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+			require.NoError(t, err)
+
+			resp, err := DoRequest(c, req, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+
+			if tc.wantBody != "" {
+				require.NoError(t, err)
+				defer resp.Body.Close()
+				body, readErr := io.ReadAll(resp.Body)
+				require.NoError(t, readErr)
+				assert.Equal(t, tc.wantBody, string(body))
+				return
+			}
+			require.Error(t, err)
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, 529, apiErr.StatusCode)
+			assert.Equal(t, "overloaded_error", apiErr.ToClaudeError().Type)
+			assert.Equal(t, tc.wantSkipRetry, types.IsSkipRetryError(apiErr))
+		})
 	}
 }

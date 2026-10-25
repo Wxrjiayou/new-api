@@ -182,6 +182,13 @@ var RelayIdleConnTimeout int // unit is second
 // ResponseHeaderTimeout only bounds the wait for the response headers; once the
 // headers arrive, streaming is unaffected.
 var RelayResponseHeaderTimeout int // unit is second
+
+// RelayFirstByteTimeout limits how long one upstream attempt may wait for the
+// first response byte; on timeout the request moves to another channel.
+// RelayFirstByteBudget is shared by all attempts of one request so retries
+// cannot chain into an unbounded wait. 0 disables either limit.
+var RelayFirstByteTimeout int // unit is second
+var RelayFirstByteBudget int  // unit is second
 var RelayMaxIdleConns int
 var RelayMaxIdleConnsPerHost int
 

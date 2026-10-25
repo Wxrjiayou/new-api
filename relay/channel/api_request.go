@@ -1,6 +1,8 @@
 package channel
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
@@ -485,14 +488,68 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	// First-byte timeout: one attempt waits at most RelayFirstByteTimeout for the
+	// first response byte, capped by what is left of the request's shared budget.
+	firstByteTimeout := time.Duration(common2.RelayFirstByteTimeout) * time.Second
+	if firstByteTimeout > 0 {
+		budgetStart, ok := common2.GetContextKeyType[time.Time](c, appconstant.ContextKeyFirstByteBudgetStart)
+		if !ok {
+			budgetStart = time.Now()
+			common2.SetContextKey(c, appconstant.ContextKeyFirstByteBudgetStart, budgetStart)
+		}
+		if budget := time.Duration(common2.RelayFirstByteBudget) * time.Second; budget > 0 {
+			remaining := budget - time.Since(budgetStart)
+			if remaining <= 0 {
+				logger.LogWarn(c, common2.LogText("first byte budget of %s exhausted, not sending another upstream attempt", budget))
+				return nil, upstreamOverloadedError(types.ErrOptionWithSkipRetry())
+			}
+			firstByteTimeout = min(firstByteTimeout, remaining)
+		}
+	}
+	var firstByteTimedOut atomic.Bool
+	cancelRequest := func() {}
+	stopFirstByteTimer := func() bool { return false }
+	if firstByteTimeout > 0 {
+		ctx, cancel := context.WithCancel(req.Context())
+		req = req.WithContext(ctx)
+		cancelRequest = cancel
+		timer := time.AfterFunc(firstByteTimeout, func() {
+			firstByteTimedOut.Store(true)
+			cancel()
+		})
+		stopFirstByteTimer = timer.Stop
+	}
+
 	common2.SetContextKey(c, appconstant.ContextKeyUpstreamRequestOrigin, req.URL.Scheme+"://"+req.URL.Host)
 	resp, err := relayClient.Do(req)
 	if err != nil {
+		stopFirstByteTimer()
+		cancelRequest()
+		if firstByteTimedOut.Load() {
+			logger.LogWarn(c, common2.LogText("no upstream response within first byte timeout %s", firstByteTimeout))
+			return nil, upstreamOverloadedError()
+		}
 		logger.LogError(c, common2.LogText("do request failed: %s", err.Error()))
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		stopFirstByteTimer()
+		cancelRequest()
 		return nil, errors.New("resp is nil")
+	}
+	if firstByteTimeout > 0 {
+		// Headers can arrive long before the first event of a stream, so wait
+		// for the first body byte while the timer still runs.
+		body := bufio.NewReader(resp.Body)
+		_, _ = body.Peek(1)
+		stopFirstByteTimer()
+		if firstByteTimedOut.Load() {
+			_ = resp.Body.Close()
+			cancelRequest()
+			logger.LogWarn(c, common2.LogText("no upstream response body within first byte timeout %s", firstByteTimeout))
+			return nil, upstreamOverloadedError()
+		}
+		resp.Body = &firstByteBody{Reader: body, body: resp.Body, cancel: cancelRequest}
 	}
 	if common2.DebugEnabled {
 		policy := service.NormalizeHTTPTransportPolicy(info.ChannelSetting)
@@ -511,6 +568,26 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()
 	return resp, nil
+}
+
+// upstreamOverloadedError is returned when no upstream answered in time. 529
+// is in the retryable range, so the request moves to another channel.
+func upstreamOverloadedError(ops ...types.NewAPIErrorOptions) *types.NewAPIError {
+	return types.NewErrorWithStatusCode(errors.New("Overloaded"), types.ErrorCodeDoRequestFailed, 529, ops...)
+}
+
+// firstByteBody keeps the bytes peeked for the first-byte timeout and releases
+// the request context when the body is closed.
+type firstByteBody struct {
+	*bufio.Reader
+	body   io.Closer
+	cancel context.CancelFunc
+}
+
+func (b *firstByteBody) Close() error {
+	err := b.body.Close()
+	b.cancel()
+	return err
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {

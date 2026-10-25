@@ -77,6 +77,9 @@ const (
 	// ContextKeyKeepAliveBytes counts SSE ping bytes so retry decisions can tell
 	// keep-alive comments apart from response data the client already received.
 	ContextKeyKeepAliveBytes ContextKey = "keep_alive_bytes"
+	// ContextKeyFirstByteBudgetStart is when the first upstream attempt of the
+	// request started; all attempts share one first-byte budget from it.
+	ContextKeyFirstByteBudgetStart ContextKey = "first_byte_budget_start"
 
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit
