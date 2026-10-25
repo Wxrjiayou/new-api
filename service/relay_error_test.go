@@ -206,7 +206,7 @@ func TestDecideRelayRetryReasons(t *testing.T) {
 		{name: "retry status matched", err: upstream(http.StatusTooManyRequests), retries: 1, want: PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "global"}},
 		{name: "status outside retry rules", err: upstream(http.StatusBadRequest), retries: 1, want: PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"}},
 		{name: "attempt budget exhausted", err: upstream(http.StatusTooManyRequests), retries: 0, want: PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}},
-		{name: "always skipped status", err: upstream(http.StatusGatewayTimeout), retries: 1, want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
+		{name: "gateway timeout retries", err: upstream(http.StatusGatewayTimeout), retries: 1, want: PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "global"}},
 		{name: "success status never retries", err: upstream(http.StatusOK), retries: 1, want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
 		{name: "skip retry error", err: types.NewErrorWithStatusCode(errors.New("local"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry()), retries: 1, want: PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}},
 		{name: "channel error retries without budget", err: types.NewError(errors.New("no key"), types.ErrorCodeChannelNoAvailableKey), retries: 0, want: PolicyDecision{Action: "retry", Reason: "channel_error", Source: "system"}},
@@ -227,6 +227,43 @@ func TestDecideRelayRetryReasons(t *testing.T) {
 			decision := DecideRelayRetry(c, tc.err, tc.retries)
 			assert.Equal(t, tc.want, decision)
 			assert.Equal(t, tc.want.Action == "retry", ShouldRetryRelayError(c, tc.err, tc.retries))
+		})
+	}
+}
+
+func TestDecideRelayRetryStopsAfterResponseBodyStarted(t *testing.T) {
+	retryable := types.NewOpenAIError(errors.New("upstream"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable)
+	channelErr := types.NewError(errors.New("no key"), types.ErrorCodeChannelNoAvailableKey)
+	for _, tc := range []struct {
+		name  string
+		write func(*gin.Context)
+		err   *types.NewAPIError
+		want  string
+	}{
+		{name: "nothing written", write: func(*gin.Context) {}, err: retryable, want: "retry"},
+		{name: "only keep-alive pings", write: func(c *gin.Context) {
+			common.KeepAliveBytes(c).Add(int64(len(": PING\n\n")))
+			_, _ = c.Writer.WriteString(": PING\n\n")
+		}, err: retryable, want: "retry"},
+		{name: "stream data after pings", write: func(c *gin.Context) {
+			common.KeepAliveBytes(c).Add(int64(len(": PING\n\n")))
+			_, _ = c.Writer.WriteString(": PING\n\nevent: message_start\n")
+		}, err: retryable, want: "stop"},
+		{name: "stream data", write: func(c *gin.Context) {
+			_, _ = c.Writer.WriteString("event: message_start\n")
+		}, err: retryable, want: "stop"},
+		{name: "channel error after stream data", write: func(c *gin.Context) {
+			_, _ = c.Writer.WriteString("event: message_start\n")
+		}, err: channelErr, want: "stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			tc.write(c)
+			decision := DecideRelayRetry(c, tc.err, 1)
+			assert.Equal(t, tc.want, decision.Action)
+			if tc.want == "stop" {
+				assert.Equal(t, "response_already_written", decision.Reason)
+			}
 		})
 	}
 }

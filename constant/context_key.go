@@ -74,6 +74,9 @@ const (
 	ContextKeyLanguage             ContextKey = "language"
 	ContextKeyIsStream             ContextKey = "is_stream"
 	ContextKeyResponseStreamStatus ContextKey = "response_stream_status"
+	// ContextKeyKeepAliveBytes counts SSE ping bytes so retry decisions can tell
+	// keep-alive comments apart from response data the client already received.
+	ContextKeyKeepAliveBytes ContextKey = "keep_alive_bytes"
 
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit

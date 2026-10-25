@@ -21,6 +21,12 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	if err == nil {
 		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
 	}
+	// Once response data reached the client, another channel's response would be
+	// appended to the same body (for SSE, a second message_start). Keep-alive
+	// pings are comments and do not count.
+	if common.ResponseBodyStarted(c) {
+		return PolicyDecision{Action: "stop", Reason: "response_already_written", Source: "system"}
+	}
 	if ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		source := RequestPolicy(c).SessionModeSource
 		if source == "" {

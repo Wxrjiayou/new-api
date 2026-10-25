@@ -103,6 +103,7 @@ func StartStreamKeepAlive(c *gin.Context, interval time.Duration) func() {
 		interval = DefaultPingInterval
 	}
 	SetEventStreamHeaders(c)
+	common.KeepAliveBytes(c)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Minute)
 	pingContext := c.Copy()
 	// 心跳使用原 writer，业务写入才会触发交接。
@@ -237,7 +238,9 @@ func PingData(c *gin.Context) error {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	if _, err := c.Writer.Write([]byte(": PING\n\n")); err != nil {
+	written, err := c.Writer.Write([]byte(": PING\n\n"))
+	common.KeepAliveBytes(c).Add(int64(written))
+	if err != nil {
 		return fmt.Errorf("write ping data failed: %w", err)
 	}
 	return FlushWriter(c)

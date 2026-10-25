@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -252,6 +253,30 @@ func GetContextKeyStringMap(c *gin.Context, key constant.ContextKey) map[string]
 
 func GetContextKeyTime(c *gin.Context, key constant.ContextKey) time.Time {
 	return c.GetTime(string(key))
+}
+
+// KeepAliveBytes returns the shared ping byte counter, creating it on first use.
+// Create it before gin.Context.Copy so copies share the same counter.
+func KeepAliveBytes(c *gin.Context) *atomic.Int64 {
+	if counter, ok := GetContextKeyType[*atomic.Int64](c, constant.ContextKeyKeepAliveBytes); ok {
+		return counter
+	}
+	counter := &atomic.Int64{}
+	SetContextKey(c, constant.ContextKeyKeepAliveBytes, counter)
+	return counter
+}
+
+// ResponseBodyStarted reports whether the client received response bytes other
+// than keep-alive pings.
+func ResponseBodyStarted(c *gin.Context) bool {
+	if c == nil || c.Writer == nil || !c.Writer.Written() {
+		return false
+	}
+	counter, _ := GetContextKeyType[*atomic.Int64](c, constant.ContextKeyKeepAliveBytes)
+	if counter == nil {
+		return c.Writer.Size() > 0
+	}
+	return int64(c.Writer.Size()) > counter.Load()
 }
 
 func GetContextKeyType[T any](c *gin.Context, key constant.ContextKey) (T, bool) {
