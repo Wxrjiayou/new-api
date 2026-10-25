@@ -436,6 +436,13 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	}
 	info.ObserveResponseModel(claudeResponse.Model)
 	maybeMarkClaudeRefusal(c, info, claudeResponse.StopReason)
+	// An empty 200 with no output is an upstream fault: retry on another channel.
+	// A refusal has the same shape but is a real answer and is billed normally.
+	if len(claudeResponse.Content) == 0 && claudeResponse.StopReason != "refusal" &&
+		(claudeResponse.Usage == nil || claudeResponse.Usage.OutputTokens == 0) {
+		logger.LogWarn(c, common.LogText("claude upstream returned an empty response (stop_reason=%s), retrying", claudeResponse.StopReason))
+		return types.WithClaudeError(types.ClaudeError{Type: "overloaded_error", Message: "Overloaded"}, 529)
+	}
 	if claudeInfo.Usage == nil {
 		claudeInfo.Usage = &dto.Usage{}
 	}

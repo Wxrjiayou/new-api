@@ -611,3 +611,39 @@ func TestClaudeStreamHandlerClosesTruncatedStream(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeHandlerEmptyResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantRetry bool
+	}{
+		{name: "empty end_turn is retried", body: `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-8","content":[],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":0}}`, wantRetry: true},
+		{name: "empty without usage is retried", body: `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-8","content":[],"stop_reason":"end_turn"}`, wantRetry: true},
+		{name: "refusal is billed", body: `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-8","content":[],"stop_reason":"refusal","usage":{"input_tokens":100,"output_tokens":0}}`},
+		{name: "normal reply is billed", body: `{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":2}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"}}
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(tc.body))}
+
+			usage, apiErr := ClaudeHandler(c, resp, info)
+
+			if tc.wantRetry {
+				require.NotNil(t, apiErr)
+				assert.Equal(t, 529, apiErr.StatusCode)
+				assert.False(t, types.IsSkipRetryError(apiErr))
+				assert.Empty(t, recorder.Body.String(), "nothing is written so another channel can answer")
+				return
+			}
+			require.Nil(t, apiErr)
+			require.NotNil(t, usage)
+			assert.Equal(t, 100, usage.PromptTokens)
+			assert.NotEmpty(t, recorder.Body.String())
+		})
+	}
+}
