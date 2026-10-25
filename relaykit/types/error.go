@@ -235,6 +235,9 @@ func (e *NewAPIError) ToClaudeError(upstreamURLs ...string) ClaudeError {
 			Type:    string(e.errorType),
 		}
 	}
+	if _, ok := claudeErrorTypes[result.Type]; !ok {
+		result.Type = claudeErrorTypeForStatus(e.StatusCode)
+	}
 	if e.errorCode != ErrorCodeCountTokenFailed {
 		result.Message = kitutil.MaskSensitiveInfo(result.Message, upstreamURLs...)
 	}
@@ -242,6 +245,46 @@ func (e *NewAPIError) ToClaudeError(upstreamURLs ...string) ClaudeError {
 		result.Message = string(e.errorType)
 	}
 	return result
+}
+
+// claudeErrorTypes are the error types Anthropic documents; Claude clients key
+// their retry handling on them, so anything else is replaced by the status mapping.
+var claudeErrorTypes = map[string]struct{}{
+	"invalid_request_error": {},
+	"authentication_error":  {},
+	"billing_error":         {},
+	"permission_error":      {},
+	"not_found_error":       {},
+	"request_too_large":     {},
+	"rate_limit_error":      {},
+	"api_error":             {},
+	"timeout_error":         {},
+	"overloaded_error":      {},
+}
+
+func claudeErrorTypeForStatus(statusCode int) string {
+	switch statusCode {
+	case http.StatusBadRequest:
+		return "invalid_request_error"
+	case http.StatusUnauthorized:
+		return "authentication_error"
+	case http.StatusPaymentRequired:
+		return "billing_error"
+	case http.StatusForbidden:
+		return "permission_error"
+	case http.StatusNotFound:
+		return "not_found_error"
+	case http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case http.StatusGatewayTimeout:
+		return "timeout_error"
+	case http.StatusServiceUnavailable, 529:
+		return "overloaded_error"
+	default:
+		return "api_error"
+	}
 }
 
 type NewAPIErrorOptions func(*NewAPIError)
