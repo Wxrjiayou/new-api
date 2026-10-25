@@ -2,6 +2,7 @@ package claude
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -497,4 +498,58 @@ func TestClaudeResponsePassesInputTransformationsThrough(t *testing.T) {
 		transformations + `,"usage":{"input_tokens":5,"output_tokens":1}}}`
 	require.Nil(t, HandleStreamResponseData(c, info, &ClaudeResponseInfo{Usage: &dto.Usage{}}, event))
 	assert.Contains(t, w.Body.String(), "data: "+event+"\n")
+}
+
+func TestClaudeStreamHandlerMidStreamError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 5
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	start := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-opus-4-8\",\"usage\":{\"input_tokens\":1000,\"output_tokens\":1,\"cache_read_input_tokens\":500}}}\n\n"
+	text := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello world\"}}\n\n"
+	upstreamErr := "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"
+
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantRetry bool
+	}{
+		{name: "error before output stays retryable", body: upstreamErr, wantRetry: true},
+		{name: "error after output settles partial usage", body: start + text + upstreamErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			info := &relaycommon.RelayInfo{
+				RelayFormat:  types.RelayFormatClaude,
+				StreamStatus: relaycommon.NewStreamStatus(),
+				ChannelMeta:  &relaycommon.ChannelMeta{UpstreamModelName: "claude-opus-4-8"},
+			}
+			info.SetEstimatePromptTokens(1200)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			}
+
+			usage, apiErr := ClaudeStreamHandler(c, resp, info)
+
+			if tc.wantRetry {
+				require.NotNil(t, apiErr)
+				assert.Nil(t, usage)
+				assert.Empty(t, recorder.Body.String())
+				return
+			}
+			require.Nil(t, apiErr, "partial output must settle instead of refunding")
+			require.NotNil(t, usage)
+			assert.Equal(t, 1000, usage.PromptTokens, "input comes from message_start")
+			assert.Positive(t, usage.CompletionTokens, "streamed text is estimated")
+			body := recorder.Body.String()
+			assert.Equal(t, 1, strings.Count(body, "event: error"))
+			assert.Contains(t, body, `"type":"overloaded_error"`)
+			assert.True(t, strings.HasSuffix(strings.TrimSpace(body), "}"), "error is the last event")
+		})
+	}
 }

@@ -272,7 +272,9 @@ func recordClaudeServerToolUse(info *relaycommon.RelayInfo, serverToolUse *dto.C
 	}
 }
 
-func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+// finalizeClaudeStreamUsage fills usage the upstream never reported with local
+// estimates and prepares it for settlement.
+func finalizeClaudeStreamUsage(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
 	// Claude input_tokens excludes cache reads and writes, so a fully cached
 	// prompt reports zero input; the prompt is uncounted only when the total
 	// with cache is zero as well. Zero output is uncounted only when content
@@ -305,6 +307,10 @@ func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, clau
 	if shouldApplyClaudeNormalize(info) && claudeInfo.Usage != nil {
 		recordClaudeUsage(info.TokenId, claudeInfo.Usage.PromptTokens, claudeInfo.Usage.CompletionTokens)
 	}
+}
+
+func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
+	finalizeClaudeStreamUsage(c, info, claudeInfo)
 
 	if info.RelayFormat == types.RelayFormatClaude {
 		//
@@ -351,11 +357,30 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		}
 	})
 	info.StreamStatus.RequireTerminal()
-	if err != nil {
+	if err == nil {
+		HandleStreamFinalResponse(c, info, claudeInfo)
+		return claudeInfo.Usage, nil
+	}
+	// Before any output reached the client the request can still move to
+	// another channel, so the error goes to the retry loop.
+	if !common.ResponseBodyStarted(c) {
 		return nil, err
 	}
-
-	HandleStreamFinalResponse(c, info, claudeInfo)
+	// The upstream bills the partial output, so settle on the usage received
+	// so far plus estimates and end the stream with the error event.
+	if shouldApplyClaudeNormalize(info) {
+		err = NormalizeClaudeError(err, err.StatusCode)
+	}
+	err.SetMessage(common.MessageWithRequestId(err.Error(), c.GetString(common.RequestIdKey)))
+	finalizeClaudeStreamUsage(c, info, claudeInfo)
+	if info.RelayFormat == types.RelayFormatClaude {
+		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: err.ToClaudeError()})
+	} else {
+		_ = helper.ObjectData(c, gin.H{"error": err.ToOpenAIError()})
+		if info.RelayFormat == types.RelayFormatOpenAI {
+			helper.Done(c)
+		}
+	}
 	return claudeInfo.Usage, nil
 }
 
