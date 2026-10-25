@@ -1,7 +1,7 @@
 # 代理（Agent）用户类型：实现说明
 
 - 分支：`feat/agent-user`（从 `dev` 的 `425d0b2b3` 切出）
-- 依据：根目录 `agent-user-type-design.md`
+- 依据：`docs/agent-user-type-design.md`
 - 提交：
 
 | 提交 | 内容 |
