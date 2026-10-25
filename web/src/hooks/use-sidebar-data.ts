@@ -108,6 +108,17 @@ export function useSidebarData(): SidebarData {
         ],
       },
       {
+        id: 'agent',
+        title: t('Agent'),
+        items: [
+          {
+            title: t('My Users'),
+            url: '/agent-users',
+            icon: Users,
+          },
+        ],
+      },
+      {
         id: 'personal',
         title: t('Personal'),
         items: [

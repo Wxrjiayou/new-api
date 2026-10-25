@@ -86,6 +86,7 @@ import {
   getUser,
   getGroups,
   getPermissionCatalog,
+  searchUsers,
 } from '../api'
 import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -135,6 +136,27 @@ export function UsersMutateDrawer({
     queryFn: async () => requireServerSuccess(await getPermissionCatalog()),
     staleTime: 5 * 60 * 1000,
   })
+
+  const viewerIsRoot = currentUser?.role === ROLE.SUPER_ADMIN
+  // Only root assigns owning agents, and only common users can be owned.
+  const canAssignAgent =
+    viewerIsRoot && isUpdate && currentRow?.role === ROLE.USER
+  const { data: agentsData } = useQuery({
+    queryKey: ['agent-users'],
+    queryFn: async () =>
+      requireServerSuccess(
+        await searchUsers({ role: String(ROLE.AGENT), p: 1, page_size: 100 })
+      ),
+    enabled: open && canAssignAgent,
+    staleTime: 60 * 1000,
+  })
+  const agentOptions = [
+    { value: '0', label: t('None') },
+    ...(agentsData?.data?.items ?? []).map((agent) => ({
+      value: String(agent.id),
+      label: `${agent.username} (#${agent.id})`,
+    })),
+  ]
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -218,11 +240,14 @@ export function UsersMutateDrawer({
           if (!proof) return
           proofToken = proof.proof_token
         }
-      } else if ((payload.role ?? 0) >= ROLE.ADMIN) {
+      } else if ((payload.role ?? 0) >= ROLE.AGENT) {
         const proof = await requestVerification({
           scope: 'admin.user.create',
           context: { role: payload.role ?? ROLE.ADMIN },
-          title: t('Verify to create administrator'),
+          title:
+            payload.role === ROLE.AGENT
+              ? t('Verify to create agent')
+              : t('Verify to create administrator'),
           description: t(
             'Confirm your identity before creating an administrator account.'
           ),
@@ -336,6 +361,9 @@ export function UsersMutateDrawer({
                         <Select
                           items={[
                             { value: '1', label: t('Common User') },
+                            ...(viewerIsRoot
+                              ? [{ value: '5', label: t('Agent') }]
+                              : []),
                             { value: '10', label: t('Admin') },
                           ]}
                           onValueChange={(value) =>
@@ -354,6 +382,9 @@ export function UsersMutateDrawer({
                               <SelectItem value='1'>
                                 {t('Common User')}
                               </SelectItem>
+                              {viewerIsRoot && (
+                                <SelectItem value='5'>{t('Agent')}</SelectItem>
+                              )}
                               <SelectItem value='10'>{t('Admin')}</SelectItem>
                             </SelectGroup>
                           </SelectContent>
@@ -476,6 +507,35 @@ export function UsersMutateDrawer({
                       </FormItem>
                     )}
                   />
+
+                  {canAssignAgent && (
+                    <FormField
+                      control={form.control}
+                      name='agent_id'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Owning Agent')}</FormLabel>
+                          <FormControl>
+                            <Combobox
+                              options={agentOptions}
+                              onValueChange={(value) =>
+                                field.onChange(Number(value ?? 0))
+                              }
+                              value={String(field.value ?? 0)}
+                              className='w-full'
+                              placeholder={t('Select an agent')}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'The agent can view this user in read-only mode.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
 
                   <FormField
                     control={form.control}

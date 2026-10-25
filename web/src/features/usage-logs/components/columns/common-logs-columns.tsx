@@ -23,7 +23,6 @@ import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Popover,
   PopoverContent,
@@ -47,7 +46,6 @@ import {
 import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
 import { taskUsageUnitLabel } from '@/features/pricing/lib/task-price-display'
 import type { BillingUsageSchema } from '@/features/pricing/types'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -78,6 +76,7 @@ import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
+import { LogUserCell } from './log-user-cell'
 
 interface DetailSegment {
   text: string
@@ -340,10 +339,29 @@ function buildTypeDetailSegments(
   return segments
 }
 
+/**
+ * The user column. The user-info dialog reads an admin route, so it is only
+ * opened when `interactive` (admin view); agents get plain text.
+ */
+function buildUserColumn(
+  t: (key: string) => string,
+  interactive: boolean
+): ColumnDef<UsageLog> {
+  return {
+    id: 'user',
+    header: t('User'),
+    accessorFn: (row) => row.username,
+    cell: ({ row }) => (
+      <LogUserCell log={row.original} interactive={interactive} />
+    ),
+  }
+}
+
 export function useCommonLogsColumns(
   isAdmin: boolean,
   isRoot: boolean,
-  showBillingSource = false
+  showBillingSource = false,
+  showUsers = isAdmin
 ): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const currency = useSystemConfigStore((state) => state.config.currency)
@@ -544,66 +562,10 @@ export function useCommonLogsColumns(
             )
           },
         },
-        {
-          id: 'user',
-          header: t('User'),
-          accessorFn: (row) => row.username,
-          cell: function UserCell({ row }) {
-            const {
-              sensitiveVisible,
-              setSelectedUserId,
-              setUserInfoDialogOpen,
-            } = useUsageLogsContext()
-            const log = row.original
-
-            if (!log.username) return null
-
-            return (
-              <button
-                type='button'
-                className='flex items-center gap-1.5 text-left'
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setSelectedUserId(log.user_id)
-                  setUserInfoDialogOpen(true)
-                }}
-              >
-                <Avatar className='ring-border/60 size-6 ring-1 max-sm:hidden'>
-                  <AvatarFallback
-                    className={cn(
-                      'text-[11px] font-semibold',
-                      !sensitiveVisible && 'bg-muted text-muted-foreground'
-                    )}
-                    style={
-                      sensitiveVisible
-                        ? getUserAvatarStyle(log.username)
-                        : undefined
-                    }
-                  >
-                    {sensitiveVisible
-                      ? getUserAvatarFallback(log.username)
-                      : '•'}
-                  </AvatarFallback>
-                </Avatar>
-                <TooltipProvider delay={300}>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className='text-muted-foreground max-w-[100px] truncate text-sm hover:underline' />
-                      }
-                    >
-                      {sensitiveVisible ? log.username : '••••'}
-                    </TooltipTrigger>
-                    {sensitiveVisible && log.username.length > 12 && (
-                      <TooltipContent side='top'>{log.username}</TooltipContent>
-                    )}
-                  </Tooltip>
-                </TooltipProvider>
-              </button>
-            )
-          },
-        }
+        buildUserColumn(t, true)
       )
+    } else if (showUsers) {
+      columns.push(buildUserColumn(t, false))
     }
 
     columns.push({
@@ -894,5 +856,5 @@ export function useCommonLogsColumns(
     return columns
     // Log formatters read currency settings from the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t, isAdmin, isRoot, showBillingSource, currency])
+  }, [t, isAdmin, isRoot, showBillingSource, showUsers, currency])
 }

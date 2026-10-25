@@ -7336,6 +7336,26 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "A user cannot be its own agent": "Un utilisateur ne peut pas être son propre agent",
+    "Agent": "Agent",
+    "Agents cannot manage users": "Les agents ne peuvent pas gérer les utilisateurs",
+    "My Users": "Mes utilisateurs",
+    "No accounts are assigned to you yet.": "Aucun compte ne vous est encore attribué.",
+    "Only agents can view owned users": "Seuls les agents peuvent voir leurs utilisateurs",
+    "Only common users can become agents": "Seuls les utilisateurs standard peuvent devenir agents",
+    "Only common users can belong to an agent": "Seuls les utilisateurs standard peuvent appartenir à un agent",
+    "Only the super administrator can create agents": "Seul le super administrateur peut créer des agents",
+    "Only the super administrator can view agent rosters": "Seul le super administrateur peut consulter les utilisateurs des agents",
+    "Owning Agent": "Agent responsable",
+    "Remove the agent relationship before promoting this user": "Retirez le rattachement à l'agent avant de promouvoir cet utilisateur",
+    "Select an agent": "Sélectionner un agent",
+    "Set as agent": "Définir comme agent",
+    "The agent can view this user in read-only mode.": "L'agent peut consulter cet utilisateur en lecture seule.",
+    "The owning agent must be an agent account": "L'agent responsable doit être un compte agent",
+    "This agent already owns {{max}} users": "Cet agent possède déjà {{max}} utilisateurs",
+    "This agent owns more than {{max}} users": "Cet agent possède plus de {{max}} utilisateurs",
+    "Users that belong to an agent cannot become agents": "Un utilisateur rattaché à un agent ne peut pas devenir agent",
+    "Verify to create agent": "Vérifier pour créer l'agent"
   }
 }

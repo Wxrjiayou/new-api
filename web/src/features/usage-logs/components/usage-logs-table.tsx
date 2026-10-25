@@ -93,6 +93,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const {
     isAdminView: isAdmin,
     isRootView: isRoot,
+    showUsers,
     viewAccess,
   } = useLogsViewScope()
   const isMobile = useMediaQuery('(max-width: 640px)')
@@ -150,6 +151,10 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
               searchKey: 'channel',
               type: 'string' as const,
             },
+          ]
+        : []),
+      ...(showUsers
+        ? [
             {
               columnId: 'username',
               searchKey: 'username',
@@ -175,6 +180,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       const result = await fetchLogsByCategory({
         logCategory,
         isAdmin,
+        showUsers,
         page: pagination.pageIndex + 1,
         pageSize: pagination.pageSize,
         searchParams,
@@ -203,7 +209,8 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     logCategory,
     isAdmin,
     isRoot,
-    showBillingSource
+    showBillingSource,
+    showUsers
   )
   const isLoadingData = isLoading || (isFetching && !data)
 

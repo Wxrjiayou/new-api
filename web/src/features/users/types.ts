@@ -28,7 +28,7 @@ import type { AdminPermissionMatrix } from '@/lib/admin-permissions'
 export const userStatusSchema = z.number()
 export type UserStatus = z.infer<typeof userStatusSchema>
 
-/** User role: 1 = common user, 10 = admin, 100 = root */
+/** User role: 1 = common user, 5 = agent, 10 = admin, 100 = root */
 export const userRoleSchema = z.number()
 export type UserRole = z.infer<typeof userRoleSchema>
 
@@ -59,6 +59,7 @@ export const userSchema = z.object({
   last_login_at: z.number().optional(),
   DeletedAt: z.any().nullable().optional(),
   remark: z.string().optional(),
+  agent_id: z.number().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
@@ -125,12 +126,14 @@ export interface UserFormData {
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
   remark?: string // Only used when updating user
+  agent_id?: number // Root only; 0 releases the user from its agent
   admin_permissions?: AdminPermissionMatrix
 }
 
 export type ManageUserAction =
   | 'promote'
   | 'demote'
+  | 'set_agent'
   | 'enable'
   | 'disable'
   | 'delete'

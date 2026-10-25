@@ -30,13 +30,18 @@ type Translate = (key: string, options?: Record<string, unknown>) => string
 
 /**
  * Column titles of the exported log file. User and channel columns are only
- * in the administrator view, matching the log table.
+ * in the administrator view, matching the log table; agents also get the
+ * user column (showUsers).
  */
-export function getLogCsvHeader(isAdmin: boolean, t: Translate): string[] {
+export function getLogCsvHeader(
+  isAdmin: boolean,
+  t: Translate,
+  showUsers = isAdmin
+): string[] {
   return [
     t('Time'),
     t('Type'),
-    ...(isAdmin ? [t('User')] : []),
+    ...(showUsers ? [t('User')] : []),
     t('Token'),
     t('Group'),
     t('Model'),
@@ -58,7 +63,8 @@ export function getLogCsvHeader(isAdmin: boolean, t: Translate): string[] {
 export function getLogCsvRow(
   log: UsageLog,
   isAdmin: boolean,
-  t: Translate
+  t: Translate,
+  showUsers = isAdmin
 ): string[] {
   const other = parseLogOther(log.other ?? '')
   const usage = isDisplayableLogType(log.type)
@@ -76,7 +82,7 @@ export function getLogCsvRow(
   return [
     formatTimestampToDate(log.created_at),
     t(getLogTypeConfig(log.type).label),
-    ...(isAdmin ? [log.username ?? ''] : []),
+    ...(showUsers ? [log.username ?? ''] : []),
     logTokenName(log, t),
     log.group ?? '',
     log.model_name ?? '',

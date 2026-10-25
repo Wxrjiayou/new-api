@@ -51,7 +51,7 @@ const DEFAULT_MAX_RANGE_DAYS = 365
 export function ExportLogsDialog() {
   const { t } = useTranslation()
   const searchParams = route.useSearch()
-  const { canManageScope, isAdminView } = useLogsViewScope()
+  const { canManageScope, isAdminView, showUsers } = useLogsViewScope()
   const { status } = useStatus()
   const [open, setOpen] = useState(false)
   const [range, setRange] = useState<{ start?: Date; end?: Date }>({})
@@ -98,7 +98,7 @@ export function ExportLogsDialog() {
     if (!range.start || !range.end) return
     const controller = new AbortController()
     abortRef.current = controller
-    const lines = [toCsvLine(getLogCsvHeader(isAdminView, t))]
+    const lines = [toCsvLine(getLogCsvHeader(isAdminView, t, showUsers))]
     setExportedCount(0)
     try {
       const count = await exportLogs(
@@ -108,6 +108,7 @@ export function ExportLogsDialog() {
             pageSize: 1,
             searchParams,
             isAdmin: isAdminView,
+            showUsers,
           }),
           p: undefined,
           page_size: undefined,
@@ -118,7 +119,7 @@ export function ExportLogsDialog() {
         {
           signal: controller.signal,
           onLog: (log) => {
-            lines.push(toCsvLine(getLogCsvRow(log, isAdminView, t)))
+            lines.push(toCsvLine(getLogCsvRow(log, isAdminView, t, showUsers)))
             if (lines.length % 500 === 0) setExportedCount(lines.length - 1)
           },
         }

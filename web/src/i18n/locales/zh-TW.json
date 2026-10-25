@@ -7336,6 +7336,26 @@
     "Zhipu": "智譜",
     "Zhipu GLM": "智譜GLM",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "A user cannot be its own agent": "使用者不能成為自己的代理",
+    "Agent": "代理",
+    "Agents cannot manage users": "代理無法管理使用者",
+    "My Users": "我的使用者",
+    "No accounts are assigned to you yet.": "目前尚無帳號分配給你。",
+    "Only agents can view owned users": "只有代理可以查看名下使用者",
+    "Only common users can become agents": "只有一般使用者可以成為代理",
+    "Only common users can belong to an agent": "只有一般使用者可以歸屬於代理",
+    "Only the super administrator can create agents": "只有超級管理員可以建立代理",
+    "Only the super administrator can view agent rosters": "只有超級管理員可以查看代理名下使用者",
+    "Owning Agent": "所屬代理",
+    "Remove the agent relationship before promoting this user": "請先解除該使用者的代理歸屬再提升權限",
+    "Select an agent": "選擇代理",
+    "Set as agent": "設為代理",
+    "The agent can view this user in read-only mode.": "代理可以唯讀查看該使用者。",
+    "The owning agent must be an agent account": "所屬代理必須是代理帳號",
+    "This agent already owns {{max}} users": "該代理名下使用者已達 {{max}} 個",
+    "This agent owns more than {{max}} users": "該代理名下使用者超過 {{max}} 個",
+    "Users that belong to an agent cannot become agents": "已歸屬代理的使用者不能成為代理",
+    "Verify to create agent": "驗證後建立代理"
   }
 }

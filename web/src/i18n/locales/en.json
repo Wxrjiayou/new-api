@@ -7343,6 +7343,26 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "A user cannot be its own agent": "A user cannot be its own agent",
+    "Agent": "Agent",
+    "Agents cannot manage users": "Agents cannot manage users",
+    "My Users": "My Users",
+    "No accounts are assigned to you yet.": "No accounts are assigned to you yet.",
+    "Only agents can view owned users": "Only agents can view owned users",
+    "Only common users can become agents": "Only common users can become agents",
+    "Only common users can belong to an agent": "Only common users can belong to an agent",
+    "Only the super administrator can create agents": "Only the super administrator can create agents",
+    "Only the super administrator can view agent rosters": "Only the super administrator can view agent rosters",
+    "Owning Agent": "Owning Agent",
+    "Remove the agent relationship before promoting this user": "Remove the agent relationship before promoting this user",
+    "Select an agent": "Select an agent",
+    "Set as agent": "Set as agent",
+    "The agent can view this user in read-only mode.": "The agent can view this user in read-only mode.",
+    "The owning agent must be an agent account": "The owning agent must be an agent account",
+    "This agent already owns {{max}} users": "This agent already owns {{max}} users",
+    "This agent owns more than {{max}} users": "This agent owns more than {{max}} users",
+    "Users that belong to an agent cannot become agents": "Users that belong to an agent cannot become agents",
+    "Verify to create agent": "Verify to create agent"
   }
 }

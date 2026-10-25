@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  Eye,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -50,6 +51,7 @@ import type { AdminUserManageAction } from '@/features/auth/secure-verification'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
 import { handleServerError } from '@/lib/handle-server-error'
 import { AuthOperationError } from '@/lib/secure-verification'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
@@ -68,6 +70,7 @@ const MANAGE_ACTION_TITLES: Record<AdminUserManageAction, string> = {
   enable: 'Verify to enable user',
   promote: 'Verify to promote user',
   demote: 'Verify to demote user',
+  set_agent: 'Verify to set user as agent',
 }
 
 interface DataTableRowActionsProps {
@@ -77,6 +80,7 @@ interface DataTableRowActionsProps {
 export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { t } = useTranslation()
   const user = row.original
+  const viewerIsRoot = useAuthStore((s) => s.auth.user?.role === USER_ROLE.ROOT)
   const {
     setOpen,
     setCurrentRow,
@@ -187,6 +191,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const isDisabled = user.status === USER_STATUS.DISABLED
   const isAdmin = user.role >= USER_ROLE.ADMIN
   const isRoot = user.role === USER_ROLE.ROOT
+  const isAgent = user.role === USER_ROLE.AGENT
+  // The backend rejects promoting agents or owned users; root unwinds those first.
+  const canPromote = !isAdmin && !isAgent && !user.agent_id
+  const canSetAgent =
+    viewerIsRoot && user.role === USER_ROLE.USER && !user.agent_id
 
   if (isUserDeleted(user)) {
     return null
@@ -233,7 +242,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
         )}
 
-        {isAdmin && !isRoot && (
+        {(isAdmin || isAgent) && !isRoot && (
           <DropdownMenuItem onClick={() => handleManage('demote')}>
             {t('Demote')}
             <DropdownMenuShortcut>
@@ -242,11 +251,20 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
         )}
 
-        {!isAdmin && (
+        {canPromote && (
           <DropdownMenuItem onClick={() => handleManage('promote')}>
             {t('Promote')}
             <DropdownMenuShortcut>
               <ArrowUp size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+        )}
+
+        {canSetAgent && (
+          <DropdownMenuItem onClick={() => handleManage('set_agent')}>
+            {t('Set as agent')}
+            <DropdownMenuShortcut>
+              <Eye size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
         )}

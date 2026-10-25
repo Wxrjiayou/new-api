@@ -7336,6 +7336,26 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "A user cannot be its own agent": "Người dùng không thể là đại lý của chính mình",
+    "Agent": "Đại lý",
+    "Agents cannot manage users": "Đại lý không thể quản lý người dùng",
+    "My Users": "Người dùng của tôi",
+    "No accounts are assigned to you yet.": "Chưa có tài khoản nào được gán cho bạn.",
+    "Only agents can view owned users": "Chỉ đại lý mới có thể xem người dùng thuộc quyền",
+    "Only common users can become agents": "Chỉ người dùng thường mới có thể trở thành đại lý",
+    "Only common users can belong to an agent": "Chỉ người dùng thường mới có thể thuộc về đại lý",
+    "Only the super administrator can create agents": "Chỉ quản trị viên cấp cao mới có thể tạo đại lý",
+    "Only the super administrator can view agent rosters": "Chỉ quản trị viên cấp cao mới có thể xem danh sách người dùng của đại lý",
+    "Owning Agent": "Đại lý quản lý",
+    "Remove the agent relationship before promoting this user": "Hãy gỡ liên kết đại lý trước khi nâng quyền người dùng này",
+    "Select an agent": "Chọn đại lý",
+    "Set as agent": "Đặt làm đại lý",
+    "The agent can view this user in read-only mode.": "Đại lý có thể xem người dùng này ở chế độ chỉ đọc.",
+    "The owning agent must be an agent account": "Đại lý quản lý phải là tài khoản đại lý",
+    "This agent already owns {{max}} users": "Đại lý này đã có {{max}} người dùng",
+    "This agent owns more than {{max}} users": "Đại lý này có hơn {{max}} người dùng",
+    "Users that belong to an agent cannot become agents": "Người dùng đã thuộc đại lý không thể trở thành đại lý",
+    "Verify to create agent": "Xác minh để tạo đại lý"
   }
 }

@@ -99,7 +99,8 @@ export function useUsageLogsContext() {
  * their current view preference (`viewScope`) has that scope active
  * (`isAdminView`). Data fetching and admin-only UI should key off
  * `isAdminView` rather than raw role, so an admin who switches to "only
- * mine" is treated exactly like a regular user for that view.
+ * mine" is treated exactly like a regular user for that view. `showUsers`
+ * is the narrower flag for username display and filtering.
  */
 export function useLogsViewScope() {
   const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.GUEST)
@@ -108,6 +109,9 @@ export function useLogsViewScope() {
   const viewAccess = resolveLogsViewAccess(role, viewScope)
   const isAdminView = viewAccess !== 'self'
   const isRootView = viewAccess === 'root'
+  // Agents read the self routes, which also return the users they own, so
+  // they need the username column and filter without any other admin UI.
+  const showUsers = isAdminView || role === ROLE.AGENT
 
   return {
     canManageScope,
@@ -115,6 +119,7 @@ export function useLogsViewScope() {
     setViewScope,
     isAdminView,
     isRootView,
+    showUsers,
     viewAccess,
   }
 }

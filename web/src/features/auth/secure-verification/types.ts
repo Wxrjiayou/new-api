@@ -48,7 +48,12 @@ export type SecurityProofScope =
   | 'admin.user.binding.clear'
 
 /** ManageUser actions that change a user's status or role and need step-up. */
-export type AdminUserManageAction = 'disable' | 'enable' | 'promote' | 'demote'
+export type AdminUserManageAction =
+  | 'disable'
+  | 'enable'
+  | 'promote'
+  | 'demote'
+  | 'set_agent'
 
 export type VerificationOperation =
   | { scope: 'channel.key.read'; context: { channel_id: number } }
@@ -111,7 +116,11 @@ export interface SecurityProof {
 
 export interface VerificationRequirements {
   scope: SecurityProofScope | 'auth.login'
-  methods: { method: VerificationMethod; available: boolean; reason?: string }[]
+  methods: {
+    method: VerificationMethod
+    available: boolean
+    reason?: string
+  }[]
   oauth_providers: { slug: string; name: string }[]
   password_encryption_enabled: boolean
 }

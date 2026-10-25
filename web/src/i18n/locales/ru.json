@@ -7336,6 +7336,26 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "A user cannot be its own agent": "Пользователь не может быть своим собственным агентом",
+    "Agent": "Агент",
+    "Agents cannot manage users": "Агенты не могут управлять пользователями",
+    "My Users": "Мои пользователи",
+    "No accounts are assigned to you yet.": "Вам пока не назначено ни одной учётной записи.",
+    "Only agents can view owned users": "Только агенты могут просматривать своих пользователей",
+    "Only common users can become agents": "Агентом может стать только обычный пользователь",
+    "Only common users can belong to an agent": "К агенту могут относиться только обычные пользователи",
+    "Only the super administrator can create agents": "Создавать агентов может только суперадминистратор",
+    "Only the super administrator can view agent rosters": "Просматривать пользователей агентов может только суперадминистратор",
+    "Owning Agent": "Агент-владелец",
+    "Remove the agent relationship before promoting this user": "Перед повышением уберите привязку пользователя к агенту",
+    "Select an agent": "Выберите агента",
+    "Set as agent": "Сделать агентом",
+    "The agent can view this user in read-only mode.": "Агент может просматривать этого пользователя только для чтения.",
+    "The owning agent must be an agent account": "Агент-владелец должен быть учётной записью агента",
+    "This agent already owns {{max}} users": "У этого агента уже {{max}} пользователей",
+    "This agent owns more than {{max}} users": "У этого агента более {{max}} пользователей",
+    "Users that belong to an agent cannot become agents": "Пользователь, привязанный к агенту, не может стать агентом",
+    "Verify to create agent": "Подтвердите для создания агента"
   }
 }
