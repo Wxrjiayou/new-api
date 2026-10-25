@@ -210,6 +210,11 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	// router/authz-router.go
 	"GET /api/authz/catalog": accessTokenScopeRule("user:read"),
 
+	// router/agent-router.go
+	"GET /api/agent/users":     accessTokenScopeRule("agent:read"),
+	"GET /api/agent/users/:id": accessTokenScopeRule("agent:read"),
+	"GET /api/agent/roster":    accessTokenScopeRule("agent:read"),
+
 	// router/api-router.go: /api/token
 	"GET /api/token/":            accessTokenScopeRule("api_key:read"),
 	"GET /api/token/search":      accessTokenScopeRule("api_key:read"),

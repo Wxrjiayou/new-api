@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -69,6 +70,10 @@ func GetUserQuotaDates(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if agentID, ok := service.AgentScopeFromContext(c); ok {
+		getAgentQuotaDates(c, agentID, startTimestamp, endTimestamp)
+		return
+	}
 	dates, err := model.GetQuotaDataByUserId(userId, startTimestamp, endTimestamp)
 	if err != nil {
 		common.ApiError(c, err)
@@ -109,6 +114,10 @@ func GetUserFlowQuotaDates(c *gin.Context) {
 	}
 	if _, err := limitLogTimeRange(startTimestamp, endTimestamp); err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if agentID, ok := service.AgentScopeFromContext(c); ok {
+		getAgentFlowQuotaDates(c, agentID, startTimestamp, endTimestamp)
 		return
 	}
 	dates, err := model.GetFlowQuotaData(startTimestamp, endTimestamp, "", userId, common.RoleCommonUser)

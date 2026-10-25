@@ -381,6 +381,9 @@ func SearchUsers(c *gin.Context) {
 }
 
 func canManageTargetRole(myRole int, targetRole int) bool {
+	if myRole < common.RoleAdminUser {
+		return false
+	}
 	return myRole == common.RoleRootUser || myRole > targetRole
 }
 
@@ -650,8 +653,14 @@ func GetUserModels(c *gin.Context) {
 }
 
 func UpdateUser(c *gin.Context) {
+	// Only root assigns owning agents; anyone else's agent_id is ignored.
+	agentID, assignAgent, err := readAgentAssignment(c, c.GetInt("role"))
+	if err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
 	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
+	err = common.DecodeJson(c.Request.Body, &updatedUser)
 	if err != nil || updatedUser.Id == 0 {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
@@ -701,6 +710,11 @@ func UpdateUser(c *gin.Context) {
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
 			return err
 		}
+		if assignAgent && agentID != originUser.AgentId {
+			if err := model.AssignUserAgentWithTx(tx, updatedUser.Id, agentID); err != nil {
+				return err
+			}
+		}
 		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
 		authzTouched = touched
 		return err
@@ -723,6 +737,9 @@ func UpdateUser(c *gin.Context) {
 	if err := model.PublishUserAuthCache(updatedUser.Id); err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if assignAgent && agentID != originUser.AgentId {
+		auditParams["agent_id"] = agentID
 	}
 	recordManageAuditFor(c, updatedUser.Id, "user.update", auditParams)
 	c.JSON(http.StatusOK, gin.H{
@@ -1020,9 +1037,13 @@ func CreateUser(c *gin.Context) {
 		common.ApiErrorT(c, "Cannot create users with permission level equal to or higher than yourself")
 		return
 	}
+	if user.Role == common.RoleAgentUser && myRole != common.RoleRootUser {
+		common.ApiErrorT(c, "Only the super administrator can create agents")
+		return
+	}
 	auditParams := map[string]any{"role": user.Role}
-	// Creating an administrator grants privilege just like promoting one.
-	if user.Role >= common.RoleAdminUser {
+	// Creating an administrator or agent grants privilege just like promoting one.
+	if user.Role >= common.RoleAgentUser {
 		authorization := requireAdminUserProof(c, service.VerificationScopeAdminUserCreate, service.AdminUserCreateContext{Role: user.Role})
 		if authorization == nil {
 			return
@@ -1079,6 +1100,27 @@ func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, 
 		return true, authz.ClearUserAuthorizationInTx(tx, userID)
 	}
 	return true, authz.SetUserPermissionsInTx(tx, userID, permissions)
+}
+
+// readAgentAssignment reads agent_id from an update request. Only root may
+// assign owning agents, so it reports no assignment for anyone else.
+func readAgentAssignment(c *gin.Context, myRole int) (int, bool, error) {
+	if myRole != common.RoleRootUser {
+		return 0, false, nil
+	}
+	var body struct {
+		AgentId *int `json:"agent_id"`
+	}
+	if err := common.UnmarshalBodyReusable(c, &body); err != nil {
+		return 0, false, err
+	}
+	if body.AgentId == nil {
+		return 0, false, nil
+	}
+	if *body.AgentId < 0 {
+		return 0, false, errors.New("invalid agent id")
+	}
+	return *body.AgentId, true, nil
 }
 
 type ManageRequest struct {
@@ -1164,7 +1206,26 @@ func ManageUser(c *gin.Context) {
 			common.ApiErrorT(c, "This user is already an administrator")
 			return
 		}
+		// Admins never own or belong to a roster; unwind agent state first.
+		if user.Role == common.RoleAgentUser || user.AgentId != 0 {
+			common.ApiErrorT(c, "Remove the agent relationship before promoting this user")
+			return
+		}
 		user.Role = common.RoleAdminUser
+	case "set_agent":
+		if myRole != common.RoleRootUser {
+			common.ApiErrorT(c, "Only the super administrator can create agents")
+			return
+		}
+		if user.Role != common.RoleCommonUser {
+			common.ApiErrorT(c, "Only common users can become agents")
+			return
+		}
+		if user.AgentId != 0 {
+			common.ApiErrorT(c, "Users that belong to an agent cannot become agents")
+			return
+		}
+		user.Role = common.RoleAgentUser
 	case "demote":
 		if user.Role == common.RoleRootUser {
 			common.ApiErrorT(c, "Cannot demote super administrator user")
@@ -1187,6 +1248,10 @@ func ManageUser(c *gin.Context) {
 	if req.Action == "demote" {
 		if err := model.DB.Transaction(func(tx *gorm.DB) error {
 			if err := user.UpdateWithTx(tx, false); err != nil {
+				return err
+			}
+			// A demoted agent releases its roster in the same commit.
+			if err := model.ClearAgentAssignments(tx, user.Id); err != nil {
 				return err
 			}
 			return authz.ClearUserAuthorizationInTx(tx, user.Id)

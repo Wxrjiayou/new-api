@@ -73,6 +73,9 @@ var accessTokenStaticResources = []AccessTokenResource{
 		accessTokenView("View Passkey, two-factor, and sign-in binding status."),
 		accessTokenEdit("Includes changes that require security verification, such as password, two-factor settings, and account deletion."),
 	}},
+	{Resource: "agent", LabelKey: "Owned users", group: AccessTokenGroupPersonal, minRole: common.RoleAgentUser, Actions: []authz.ActionDefinition{
+		accessTokenView("View the users you own as an agent."),
+	}},
 	{Resource: "user", LabelKey: "Users", group: AccessTokenGroupAdmin, minRole: common.RoleAdminUser, Actions: []authz.ActionDefinition{
 		accessTokenView("View users, their sign-in bindings, and permission settings."),
 		accessTokenEdit("Create, edit, disable, and delete users, and reset their security settings."),

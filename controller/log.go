@@ -83,6 +83,10 @@ func GetUserLogs(c *gin.Context) {
 		}
 		filter.StartTimestamp = startTimestamp
 	}
+	if agentID, ok := service.AgentScopeFromContext(c); ok {
+		getAgentUserLogs(c, agentID, filter, pageInfo)
+		return
+	}
 	logs, total, err := model.GetUserLogs(c.GetInt("id"), filter, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
@@ -154,6 +158,8 @@ func exportLogs(c *gin.Context, all bool) {
 	ctx := c.Request.Context()
 	if all {
 		err = model.StreamAllLogs(ctx, filter, c.GetInt("role"), writeLog)
+	} else if agentID, ok := service.AgentScopeFromContext(c); ok {
+		err = streamAgentLogs(c, ctx, agentID, filter, writeLog)
 	} else {
 		err = model.StreamUserLogs(ctx, userId, filter, writeLog)
 	}
@@ -238,6 +244,10 @@ func GetLogsSelfStat(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+	}
+	if agentID, ok := service.AgentScopeFromContext(c); ok {
+		getAgentLogsStat(c, agentID, startTimestamp, endTimestamp)
+		return
 	}
 	tokenName := c.Query("token_name")
 	modelName := c.Query("model_name")
