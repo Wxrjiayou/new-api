@@ -44,6 +44,9 @@ var gWhitelistKeywords = []string{
 	"does not support anyof",
 	"tool_result block",
 	"image exceeds",
+	"上下文长度",
+	"超出上下文",
+	"输入过长",
 }
 
 var abKeywords = []string{
@@ -92,6 +95,10 @@ var cKeywordsAlways = []string{
 	"quota exceeded",
 	"payment required",
 	"operation not allowed",
+	"余额",
+	"欠费",
+	"充值",
+	"额度不足",
 }
 
 var cKeywordsNon400 = []string{
@@ -109,6 +116,12 @@ var bedrockDeadKeywords = []string{
 	"independently manages customer access",
 	"555420",
 	"access to bedrock models is not allowed",
+}
+
+// Relays that list a model they cannot price will fail every request for it.
+var unpricedModelKeywords = []string{
+	"has not been priced by the administrator",
+	"尚未由管理员配置",
 }
 
 var eKeywords400 = []string{
@@ -162,6 +175,11 @@ func classifyClaudeError(message string, statusCode int) claudeErrorAction {
 	}
 
 	for _, kw := range bedrockDeadKeywords {
+		if strings.Contains(lower, kw) {
+			return actionReplaceOverloaded
+		}
+	}
+	for _, kw := range unpricedModelKeywords {
 		if strings.Contains(lower, kw) {
 			return actionReplaceOverloaded
 		}

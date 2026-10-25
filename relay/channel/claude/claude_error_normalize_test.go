@@ -288,3 +288,27 @@ func TestIsClaudeUpstream(t *testing.T) {
 	assert.False(t, IsClaudeUpstream(constant.APITypeOpenAI))
 	assert.False(t, IsClaudeUpstream(0))
 }
+
+func TestClassifyClaudeError_ChineseBalanceAndUnpricedModel(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		status  int
+		want    claudeErrorAction
+	}{
+		{"balance 400", "账户余额不足，请充值后再试", 400, actionReplaceOverloaded},
+		{"balance 500", "余额不足", 500, actionReplaceOverloaded},
+		{"arrears 403", "账户已欠费", 403, actionReplaceOverloaded},
+		{"recharge 400", "请先充值", 400, actionReplaceOverloaded},
+		{"quota short 429", "用户额度不足", 429, actionReplaceOverloaded},
+		{"unpriced model en", "model claude-x has not been priced by the administrator", 400, actionReplaceOverloaded},
+		{"unpriced model zh", "模型 claude-x 的价格尚未由管理员配置", 500, actionReplaceOverloaded},
+		{"chinese context too long passes through", "输入过长，超出上下文长度限制", 400, actionPassthrough},
+		{"insufficient tokens in prompt 400 passes through", "insufficient tokens in prompt", 400, actionPassthrough},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, classifyClaudeError(tt.message, tt.status))
+		})
+	}
+}
