@@ -250,12 +250,16 @@ export function Dashboard() {
 
   const meta = SECTION_META[activeSection] ?? SECTION_META.overview
   const isAdmin = Boolean(userRole && userRole >= ROLE.ADMIN)
+  // Agents see user analytics too, limited to themselves and the users they own.
+  const canViewUserAnalytics = isAdmin || userRole === ROLE.AGENT
   const visibleSections = useMemo(
     () =>
       DASHBOARD_SECTION_IDS.filter(
-        (section) => section !== 'overview' && (section !== 'users' || isAdmin)
+        (section) =>
+          section !== 'overview' &&
+          (section !== 'users' || canViewUserAnalytics)
       ),
-    [isAdmin]
+    [canViewUserAnalytics]
   )
   const handleSectionChange = useCallback(
     (section: string) => {
@@ -396,7 +400,7 @@ export function Dashboard() {
               </FadeIn>
             </>
           )}
-          {activeSection === 'users' && (
+          {activeSection === 'users' && canViewUserAnalytics && (
             <FadeIn>
               <Suspense fallback={<ModelChartsFallback />}>
                 <LazyUserCharts

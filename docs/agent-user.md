@@ -14,7 +14,7 @@
 代理是一个**只读观察者**，角色值 `5`，介于普通用户（1）和管理员（10）之间：
 
 - 由 root 创建，或由 root 把普通用户设为代理；名下账号由 root 在用户编辑表单里通过 `agent_id` 指定。
-- 能看到：自己和名下账号的使用日志、日志统计、数据看板，以及名下账号列表（含额度、已用额度）。
+- 能看到：自己和名下账号的使用日志、日志统计、数据看板（含"用户统计"分区），以及"我的用户"列表（自己的账号排第一，加上名下账号，含额度、已用额度）。
 - 看不到：渠道 id / 渠道名等上游信息。
 - 不能做：任何写操作。代理拿不到管理权限，因为 role 5 低于所有管理端的 `>= RoleAdminUser` 判断，出错时默认是关着的。
 - 不嵌套：只有普通用户能归属代理，代理和管理员都不能被归属。
@@ -311,13 +311,22 @@ flowQuotaBaseQuery(startTime, endTime).
 agentRoute := apiRouter.Group("/agent")
 agentRoute.Use(middleware.UserAuth())
 {
-	agentRoute.GET("/users", controller.GetAgentUsers)     // 代理：名下账号分页
+	agentRoute.GET("/users", controller.GetAgentUsers)     // 代理：自己 + 名下账号分页
 	agentRoute.GET("/users/:id", controller.GetAgentUser)  // 代理：单个名下账号
 	agentRoute.GET("/roster", controller.GetAgentRoster)   // root：查看某代理名下账号
 }
 ```
 
-`GetAgentUser` 对不属于自己的 id 一律返回 404，代理无法借此探测其他账号是否存在。
+`GetAgentUsers` 调用 `GetAgentVisibleUsers`，返回代理自己的账号和名下账号，自己排在第一行，方便代理查看自己的余额和消耗：
+
+```go
+tx := DB.Unscoped().Model(&User{}).Where("agent_id = ? OR id = ?", agentID, agentID)
+selfFirst := clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN id = ? THEN 0 ELSE 1 END, id DESC", Vars: []any{agentID}}}
+```
+
+root 用的 `GetAgentRoster` 仍只返回名下账号（`GetAgentOwnedUsers`），不含代理本人。
+
+`GetAgentUser` 只接受代理自己或名下账号的 id，其他 id 一律返回 404，代理无法借此探测其他账号是否存在。
 
 Access token 方面，`middleware/access_token_routes.go` 给这三条路由配了 `agent:read` scope；`service/access_token_scope.go` 新增 `agent` 资源，`minRole` 为 `RoleAgentUser`，只有代理及以上能在令牌里勾选。
 
@@ -363,7 +372,7 @@ const canSetAgent =
 新路由 `/agent-users`（`routes/_authenticated/agent-users/index.tsx`），页面代码在 `features/agent/`：
 
 - `api.ts`：调用 `GET /api/agent/users`
-- `components/agent-users-table.tsx`、`agent-users-columns.tsx`：只读表格，列复用用户管理的单元格；已删除账号用 `lib/user-status.ts` 标记
+- `components/agent-users-table.tsx`、`agent-users-columns.tsx`：只读表格，列复用用户管理的单元格；代理自己那一行带"我的账号"标记，已删除账号用 `lib/user-status.ts` 标记
 - `components/agent-user-actions-cell.tsx`：操作列只给提示，没有任何写操作
 
 侧边栏新增 `agent` 分组，只对 role 恰好等于 5 的用户显示，管理员看不到：
@@ -378,7 +387,19 @@ const canSetAgent =
 
 `routeTree.gen.ts` 由 TanStack router 生成器重新生成，只多出这一条路由。
 
-### 8.3 日志页适配
+### 8.3 数据看板的用户统计
+
+"用户统计"分区原来只对管理员开放，调用的 `/api/data/users` 挂在 `AdminAuth` 下。代理现在也能看到这个分区，但数据改走 `/api/data/self`。这个接口的代理分支本来就按用户返回"自己 + 名下"的行，图表按 username 汇总，不用新增或改动后端路由：
+
+```ts
+// dashboard/index.tsx
+const canViewUserAnalytics = isAdmin || userRole === ROLE.AGENT
+
+// dashboard/api.ts
+isAgent ? '/api/data/self' : '/api/data/users'
+```
+
+### 8.4 日志页适配
 
 代理请求的仍是 self 日志接口，但返回的是多个用户的数据，需要显示用户名列和用户名筛选，同时不能出现管理员 UI（渠道列、用户信息弹窗）。为此把原来的 `isAdmin` 拆出一个更窄的 `showUsers`：
 
@@ -402,9 +423,9 @@ const showUsers = isAdminView || role === ROLE.AGENT
 
 `showUsers` 默认等于 `isAdmin`，非代理的行为不变。用户名单元格拆到 `log-user-cell.tsx`，只有管理员点击会打开用户信息弹窗。
 
-### 8.4 多语言
+### 8.5 多语言
 
-新增 20 个文案，7 个语言文件都补齐。后端 `common.NewMessage` 的英文 key 也经由前端语言文件翻译。没有跑 `i18n:sync`，因为它还会补上 `dev` 上其他提交遗漏的 key，超出本次范围。
+新增 21 个文案，7 个语言文件都补齐。后端 `common.NewMessage` 的英文 key 也经由前端语言文件翻译。没有跑 `i18n:sync`，因为它还会补上 `dev` 上其他提交遗漏的 key，超出本次范围。
 
 ## 9. 测试
 
@@ -415,7 +436,7 @@ const showUsers = isAdminView || role === ROLE.AGENT
 | `TestAgentSelfLogsCoverOwnedUsersOnly` | 日志只含自己和名下账号（含已删除），不含渠道 id；普通用户不受影响 |
 | `TestAgentSelfStatSumsScopedUsersByID` | 统计按 `user_id` 汇总，改用户名后结果不变 |
 | `TestAgentDashboardCoversScopedUsers` | 看板只统计名下范围 |
-| `TestAgentUsersListsOnlyOwnedAccounts` | 用户看板只列名下账号且不含邮箱等字段，他人 id 和非代理调用都失败 |
+| `TestAgentUsersListsSelfAndOwnedAccounts` | "我的用户"列出自己（排第一）和名下账号，不含邮箱等字段；能查自己的详情，他人 id 和非代理调用都失败 |
 | `TestAssignUserAgentRules` | 不能自归属、不能嵌套、目标必须是代理 |
 | `TestManageUserSetAgentIsRootOnly` | 只有 root 能 `set_agent` |
 | `TestDemotingAgentReleasesRosterOnly` | 降级时解绑，名下账号其他字段不变 |

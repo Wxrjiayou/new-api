@@ -40,9 +40,11 @@ import type {
   ProcessedUserChartData,
   UserChartsFilters,
 } from '@/features/dashboard/types'
+import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { VCHART_OPTION } from '@/lib/vchart'
+import { useAuthStore } from '@/stores/auth-store'
 
 let themeManagerPromise: Promise<
   (typeof import('@visactor/vchart'))['ThemeManager']
@@ -137,10 +139,11 @@ export function UserCharts(props: UserChartsProps) {
     updateTheme()
   }, [resolvedTheme])
 
+  const isAgent = useAuthStore((s) => s.auth.user?.role === ROLE.AGENT)
   const { data: userData, isLoading } = useQuery({
-    queryKey: ['dashboard', 'user-quota', timeRange],
+    queryKey: ['dashboard', 'user-quota', isAgent, timeRange],
     queryFn: async () =>
-      requireServerSuccess(await getUserQuotaDataByUsers(timeRange)),
+      requireServerSuccess(await getUserQuotaDataByUsers(timeRange, isAgent)),
     select: (res) => (res.success ? res.data : []),
     staleTime: 60_000,
   })

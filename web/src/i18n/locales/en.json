@@ -7363,6 +7363,7 @@
     "This agent already owns {{max}} users": "This agent already owns {{max}} users",
     "This agent owns more than {{max}} users": "This agent owns more than {{max}} users",
     "Users that belong to an agent cannot become agents": "Users that belong to an agent cannot become agents",
-    "Verify to create agent": "Verify to create agent"
+    "Verify to create agent": "Verify to create agent",
+    "My account": "My account"
   }
 }

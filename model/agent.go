@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AgentMaxOwnedUsers bounds how many accounts one agent may own, so the owned
@@ -75,12 +76,26 @@ func GetAgentOwnedUsers(agentID int, startIdx int, num int) ([]*AgentOwnedUser, 
 	return users, total, err
 }
 
-// GetAgentOwnedUser returns one account the agent owns, or
-// gorm.ErrRecordNotFound when the account is not the agent's.
+// GetAgentVisibleUsers pages through the accounts an agent sees on its user
+// page: its own account first, then every account it owns.
+func GetAgentVisibleUsers(agentID int, startIdx int, num int) ([]*AgentOwnedUser, int64, error) {
+	var total int64
+	users := make([]*AgentOwnedUser, 0)
+	tx := DB.Unscoped().Model(&User{}).Where("agent_id = ? OR id = ?", agentID, agentID)
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	selfFirst := clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN id = ? THEN 0 ELSE 1 END, id DESC", Vars: []any{agentID}}}
+	err := tx.Select(agentOwnedUserColumns).Order(selfFirst).Limit(num).Offset(startIdx).Find(&users).Error
+	return users, total, err
+}
+
+// GetAgentOwnedUser returns the agent's own account or one it owns, or
+// gorm.ErrRecordNotFound for any other account.
 func GetAgentOwnedUser(agentID int, userID int) (*AgentOwnedUser, error) {
 	var user AgentOwnedUser
 	err := DB.Unscoped().Model(&User{}).Select(agentOwnedUserColumns).
-		Where("id = ? AND agent_id = ?", userID, agentID).Take(&user).Error
+		Where("id = ? AND (agent_id = ? OR id = ?)", userID, agentID, agentID).Take(&user).Error
 	if err != nil {
 		return nil, err
 	}

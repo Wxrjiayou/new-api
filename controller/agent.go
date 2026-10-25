@@ -19,7 +19,8 @@ import (
 // branch into the scoped handlers below; the owned account list lives here
 // under /api/agent.
 
-// GetAgentUsers lists the accounts the calling agent owns.
+// GetAgentUsers lists the calling agent's own account and the accounts it
+// owns, so the agent can follow its own balance next to theirs.
 func GetAgentUsers(c *gin.Context) {
 	agentID, ok := service.AgentScopeFromContext(c)
 	if !ok {
@@ -27,7 +28,7 @@ func GetAgentUsers(c *gin.Context) {
 		return
 	}
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.GetAgentOwnedUsers(agentID, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	users, total, err := model.GetAgentVisibleUsers(agentID, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -37,7 +38,7 @@ func GetAgentUsers(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
-// GetAgentUser returns one account the calling agent owns. Any other id is
+// GetAgentUser returns the calling agent's own account or one it owns. Any other id is
 // reported as missing, so agents cannot probe which accounts exist.
 func GetAgentUser(c *gin.Context) {
 	agentID, ok := service.AgentScopeFromContext(c)

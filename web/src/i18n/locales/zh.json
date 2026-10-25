@@ -7363,6 +7363,7 @@
     "This agent already owns {{max}} users": "该代理名下用户已达 {{max}} 个",
     "This agent owns more than {{max}} users": "该代理名下用户超过 {{max}} 个",
     "Users that belong to an agent cannot become agents": "已归属代理的用户不能成为代理",
-    "Verify to create agent": "验证后创建代理"
+    "Verify to create agent": "验证后创建代理",
+    "My account": "我的账号"
   }
 }

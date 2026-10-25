@@ -55,12 +55,17 @@ export async function getUserQuotaDates(
 // System Monitoring
 // ----------------------------------------------------------------------------
 
-export async function getUserQuotaDataByUsers(params: {
-  start_timestamp: number
-  end_timestamp: number
-}) {
+// Agents read their own data route, which the server scopes to themselves
+// and the users they own; the rows still carry usernames.
+export async function getUserQuotaDataByUsers(
+  params: {
+    start_timestamp: number
+    end_timestamp: number
+  },
+  isAgent = false
+) {
   const res = await api.get<{ success: boolean; data: QuotaDataItem[] }>(
-    '/api/data/users',
+    isAgent ? '/api/data/self' : '/api/data/users',
     { params }
   )
   return res.data

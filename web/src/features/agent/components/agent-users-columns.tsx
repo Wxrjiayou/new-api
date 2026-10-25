@@ -29,6 +29,7 @@ import { TableId } from '@/components/table-id'
 import { UserQuotaCell } from '@/features/users/components/user-quota-cell'
 import { USER_STATUS, USER_STATUSES } from '@/features/users/constants'
 import { getCurrencyDisplay } from '@/lib/currency'
+import { useAuthStore } from '@/stores/auth-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { isAgentOwnedUserDeleted } from '../lib/user-status'
@@ -38,6 +39,7 @@ import { AgentUserActionsCell } from './agent-user-actions-cell'
 export function useAgentUsersColumns(): ColumnDef<AgentOwnedUser>[] {
   const { t } = useTranslation()
   const currencyConfig = useSystemConfigStore((state) => state.config.currency)
+  const selfId = useAuthStore((state) => state.auth.user?.id)
   const { meta: currency } = getCurrencyDisplay()
   const quotaUnit = currency.kind === 'tokens' ? t('Tokens') : currency.symbol
   return useMemo<ColumnDef<AgentOwnedUser>[]>(
@@ -65,6 +67,14 @@ export function useAgentUsersColumns(): ColumnDef<AgentOwnedUser>[] {
                 <LongText className='max-w-[140px] text-sm font-normal'>
                   {username}
                 </LongText>
+                {row.original.id === selfId && (
+                  <StatusBadge
+                    label={t('My account')}
+                    variant='info'
+                    copyable={false}
+                    className='font-normal'
+                  />
+                )}
                 {remark && (
                   <StatusBadge
                     variant='success'
@@ -173,6 +183,6 @@ export function useAgentUsersColumns(): ColumnDef<AgentOwnedUser>[] {
     ],
     // UserQuotaCell reads the currency configuration from the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, quotaUnit, currencyConfig]
+    [t, quotaUnit, currencyConfig, selfId]
   )
 }

@@ -7356,6 +7356,7 @@
     "This agent already owns {{max}} users": "この代理の所属ユーザーはすでに {{max}} 人に達しています",
     "This agent owns more than {{max}} users": "この代理の所属ユーザーが {{max}} 人を超えています",
     "Users that belong to an agent cannot become agents": "代理に所属しているユーザーは代理になれません",
-    "Verify to create agent": "認証して代理を作成"
+    "Verify to create agent": "認証して代理を作成",
+    "My account": "自分のアカウント"
   }
 }

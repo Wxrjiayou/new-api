@@ -7356,6 +7356,7 @@
     "This agent already owns {{max}} users": "У этого агента уже {{max}} пользователей",
     "This agent owns more than {{max}} users": "У этого агента более {{max}} пользователей",
     "Users that belong to an agent cannot become agents": "Пользователь, привязанный к агенту, не может стать агентом",
-    "Verify to create agent": "Подтвердите для создания агента"
+    "Verify to create agent": "Подтвердите для создания агента",
+    "My account": "Мой аккаунт"
   }
 }

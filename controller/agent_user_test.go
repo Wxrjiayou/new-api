@@ -119,18 +119,25 @@ func TestAgentDashboardCoversScopedUsers(t *testing.T) {
 	assert.Equal(t, map[float64]bool{float64(f.agent.Id): true, float64(f.owned.Id): true, float64(f.deleted.Id): true}, users)
 }
 
-func TestAgentUsersListsOnlyOwnedAccounts(t *testing.T) {
+func TestAgentUsersListsSelfAndOwnedAccounts(t *testing.T) {
 	_, f := setupAgentTest(t)
 	body := performAgentRequest(t, GetAgentUsers, common.RoleAgentUser, f.agent.Id, "/api/agent/users", nil)
 	require.Equal(t, true, body["success"], body)
 	data := body["data"].(map[string]any)
-	assert.EqualValues(t, 2, data["total"])
-	for _, item := range data["items"].([]any) {
+	assert.EqualValues(t, 3, data["total"])
+	items := data["items"].([]any)
+	require.Len(t, items, 3)
+	// The agent's own account comes first so it can follow its own balance.
+	assert.Equal(t, "agent", items[0].(map[string]any)["username"])
+	for _, item := range items {
 		user := item.(map[string]any)
-		assert.Contains(t, []string{"owned", "deleted"}, user["username"])
+		assert.Contains(t, []string{"agent", "owned", "deleted"}, user["username"])
 		assert.NotContains(t, user, "email")
 		assert.NotContains(t, user, "access_token")
 	}
+
+	body = performAgentRequest(t, GetAgentUser, common.RoleAgentUser, f.agent.Id, "/api/agent/users/x", gin.Params{{Key: "id", Value: fmt.Sprint(f.agent.Id)}})
+	assert.Equal(t, true, body["success"], body)
 
 	body = performAgentRequest(t, GetAgentUser, common.RoleAgentUser, f.agent.Id, "/api/agent/users/x", gin.Params{{Key: "id", Value: fmt.Sprint(f.owned.Id)}})
 	require.Equal(t, true, body["success"], body)

@@ -7356,6 +7356,7 @@
     "This agent already owns {{max}} users": "Cet agent possède déjà {{max}} utilisateurs",
     "This agent owns more than {{max}} users": "Cet agent possède plus de {{max}} utilisateurs",
     "Users that belong to an agent cannot become agents": "Un utilisateur rattaché à un agent ne peut pas devenir agent",
-    "Verify to create agent": "Vérifier pour créer l'agent"
+    "Verify to create agent": "Vérifier pour créer l'agent",
+    "My account": "Mon compte"
   }
 }
