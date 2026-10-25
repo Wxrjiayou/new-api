@@ -214,6 +214,8 @@ func TestDistributeHidesTaskPluginDetailsButLogsDiagnostics(t *testing.T) {
 		{"zh-CN", "分组 " + group + " 下模型 task-model 无可用渠道：该模型由任务插件认领，但当前没有启用的渠道可服务此模型（distributor）"},
 		{"zh-TW", "分組 " + group + " 下模型 task-model 無可用管道：該模型由任務插件認領，但目前沒有啟用的管道可服務此模型（distributor）"},
 	} {
+		// The localized message names the group, so it only reaches the server log;
+		// clients get the generic unavailable message.
 		for _, providerCount := range []int{1, 2} {
 			t.Run(fmt.Sprintf("%s/%d_providers", locale.language, providerCount), func(t *testing.T) {
 				registry := jsplugin.NewRegistry()
@@ -263,7 +265,9 @@ func TestDistributeHidesTaskPluginDetailsButLogsDiagnostics(t *testing.T) {
 				requestID := recorder.Header().Get(common.RequestIdKey)
 				require.NotEmpty(t, requestID)
 				assert.JSONEq(t, fmt.Sprintf(`{"error":{"message":%q,"type":"new_api_error","code":"model_not_found"}}`,
-					locale.message+" (request id: "+requestID+")"), recorder.Body.String())
+					"The model is currently unavailable, please try again later (request id: "+requestID+")"), recorder.Body.String())
+				assert.NotContains(t, recorder.Body.String(), group)
+				assert.Contains(t, logs.String(), locale.message)
 				assert.NotContains(t, recorder.Body.String(), "disable or override")
 				for _, key := range keys {
 					assert.NotContains(t, recorder.Body.String(), key)
