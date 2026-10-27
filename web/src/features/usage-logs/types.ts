@@ -146,6 +146,14 @@ export interface LogOtherData {
     }
     // Reject / intercept reason (admin only)
     reject_reason?: string
+    // What the upstream returned when the client was shown a normalized
+    // error such as Overloaded (admin only)
+    upstream_error?: {
+      status_code: number
+      error_type: string
+      error_code: string
+      message: string
+    }
     task_plugin?: TaskPluginInfo
   }
   root_info?: {

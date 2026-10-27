@@ -854,6 +854,34 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {/* Original upstream error behind a normalized one (admin only) */}
+        {props.isAdmin && adminInfo?.upstream_error && (
+          <DetailSection
+            icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
+            label={t('Original upstream error')}
+            variant='danger'
+          >
+            <DetailRow
+              label={t('Status')}
+              value={String(adminInfo.upstream_error.status_code)}
+              mono
+            />
+            <DetailRow
+              label={t('Type')}
+              value={adminInfo.upstream_error.error_type}
+              mono
+            />
+            <DetailRow
+              label={t('Code')}
+              value={adminInfo.upstream_error.error_code}
+              mono
+            />
+            <p className='mt-1 text-xs wrap-break-word'>
+              {adminInfo.upstream_error.message}
+            </p>
+          </DetailSection>
+        )}
+
         {/* Violation fee info */}
         {isViolation && other && (
           <DetailSection

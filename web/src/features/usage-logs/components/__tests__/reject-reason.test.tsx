@@ -52,7 +52,14 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(isAdmin: boolean): void {
+function renderDetails(
+  isAdmin: boolean,
+  other: LogOtherData = {
+    admin_info: {
+      reject_reason: 'blocked by channel policy',
+    },
+  }
+): void {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -63,11 +70,7 @@ function renderDetails(isAdmin: boolean): void {
   render(
     <QueryClientProvider client={queryClient}>
       <DetailsDialog
-        log={makeLog({
-          admin_info: {
-            reject_reason: 'blocked by channel policy',
-          },
-        })}
+        log={makeLog(other)}
         isAdmin={isAdmin}
         isRoot={false}
         open
@@ -97,5 +100,34 @@ describe('usage log reject reason', () => {
 
     expect(screen.queryByText('Reject Reason')).toBeNull()
     expect(screen.queryByText('blocked by channel policy')).toBeNull()
+  })
+})
+
+const normalizedErrorLog: LogOtherData = {
+  admin_info: {
+    upstream_error: {
+      status_code: 400,
+      error_type: 'openai_error',
+      error_code: 'bad_response_status_code',
+      message: 'Your credit balance is too low',
+    },
+  },
+}
+
+describe('usage log original upstream error', () => {
+  test('shows the original upstream error to admins', () => {
+    renderDetails(true, normalizedErrorLog)
+
+    expect(screen.getByText('Original upstream error')).toBeInTheDocument()
+    expect(
+      screen.getByText('Your credit balance is too low')
+    ).toBeInTheDocument()
+  })
+
+  test('hides the original upstream error from non-admin users', () => {
+    renderDetails(false, normalizedErrorLog)
+
+    expect(screen.queryByText('Original upstream error')).toBeNull()
+    expect(screen.queryByText('Your credit balance is too low')).toBeNull()
   })
 })
