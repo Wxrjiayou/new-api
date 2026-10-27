@@ -381,7 +381,7 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	// The upstream bills the partial output, so settle on the usage received
 	// so far plus estimates and end the stream with the error event.
 	if shouldApplyClaudeNormalize(info) {
-		err = NormalizeClaudeError(err, err.StatusCode)
+		err = service.NormalizeUpstreamError(c, info, err)
 	}
 	err.SetMessage(common.MessageWithRequestId(err.Error(), c.GetString(common.RequestIdKey)))
 	finalizeClaudeStreamUsage(c, info, claudeInfo)

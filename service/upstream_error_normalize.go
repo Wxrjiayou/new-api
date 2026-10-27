@@ -1,12 +1,23 @@
-package claude
+package service
 
 import (
+	"errors"
+	"net/http"
 	"regexp"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+
+	"github.com/gin-gonic/gin"
 )
+
+// upstreamOriginalErrorKey holds the upstream error NormalizeUpstreamError
+// replaced, so ProcessChannelError can log it for admins and judge channel
+// disabling on what the upstream actually returned.
+const upstreamOriginalErrorKey constant.ContextKey = "upstream_original_error"
 
 func IsClaudeUpstream(apiType int) bool {
 	switch apiType {
@@ -17,10 +28,10 @@ func IsClaudeUpstream(apiType int) bool {
 	}
 }
 
-type claudeErrorAction int
+type upstreamErrorAction int
 
 const (
-	actionPassthrough claudeErrorAction = iota
+	actionPassthrough upstreamErrorAction = iota
 	actionReplaceOverloaded
 	actionReplaceOverloaded429
 	actionReplaceInternalError
@@ -132,13 +143,36 @@ var eRegexes400 = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)exceed(?:ed|s)? your (?:organization|account|org)'?s? rate limit`),
 }
 
-func classifyClaudeError(message string, statusCode int) claudeErrorAction {
+// classifyUpstreamError decides what the client sees for an upstream error.
+// The balance rules apply to every upstream; the account, plan, relay and
+// rate-limit rules were written for Claude and apply only with claudeRules.
+func classifyUpstreamError(message string, statusCode int, claudeRules bool) upstreamErrorAction {
 	lower := strings.ToLower(message)
 
 	for _, kw := range gWhitelistKeywords {
 		if strings.Contains(lower, kw) {
 			return actionPassthrough
 		}
+	}
+
+	if statusCode == http.StatusPaymentRequired {
+		return actionReplaceOverloaded
+	}
+	for _, kw := range cKeywordsAlways {
+		if strings.Contains(lower, kw) {
+			return actionReplaceOverloaded
+		}
+	}
+	if statusCode != http.StatusBadRequest {
+		for _, kw := range cKeywordsNon400 {
+			if strings.Contains(lower, kw) {
+				return actionReplaceOverloaded
+			}
+		}
+	}
+
+	if !claudeRules {
+		return actionPassthrough
 	}
 
 	for _, kw := range abKeywords {
@@ -149,22 +183,6 @@ func classifyClaudeError(message string, statusCode int) claudeErrorAction {
 	for _, re := range abRegexes {
 		if re.MatchString(message) {
 			return actionReplaceOverloaded
-		}
-	}
-
-	if statusCode == 402 {
-		return actionReplaceOverloaded
-	}
-	for _, kw := range cKeywordsAlways {
-		if strings.Contains(lower, kw) {
-			return actionReplaceOverloaded
-		}
-	}
-	if statusCode != 400 {
-		for _, kw := range cKeywordsNon400 {
-			if strings.Contains(lower, kw) {
-				return actionReplaceOverloaded
-			}
 		}
 	}
 
@@ -185,7 +203,7 @@ func classifyClaudeError(message string, statusCode int) claudeErrorAction {
 		}
 	}
 
-	if statusCode == 400 {
+	if statusCode == http.StatusBadRequest {
 		for _, kw := range eKeywords400 {
 			if strings.Contains(lower, kw) {
 				return actionReplaceOverloaded429
@@ -206,32 +224,38 @@ func classifyClaudeError(message string, statusCode int) claudeErrorAction {
 	return actionPassthrough
 }
 
-func NormalizeClaudeError(apiErr *types.NewAPIError, upstreamStatusCode int) *types.NewAPIError {
-	if apiErr == nil {
+// NormalizeUpstreamError hides upstream errors that reveal the upstream's
+// balance, account or load behind a generic overloaded error that clients
+// retry. Claude clients get 529; other clients get 503, which every official
+// SDK retries. The replaced error is kept for ProcessChannelError.
+func NormalizeUpstreamError(c *gin.Context, info *relaycommon.RelayInfo, apiErr *types.NewAPIError) *types.NewAPIError {
+	// Errors the gateway raises itself, such as the user's own quota running
+	// out, are not upstream errors and must reach the client unchanged.
+	if apiErr == nil || info == nil || apiErr.GetErrorType() == types.ErrorTypeNewAPIError {
 		return apiErr
 	}
 
-	message := apiErr.Error()
-	action := classifyClaudeError(message, upstreamStatusCode)
-
-	switch action {
-	case actionPassthrough:
-		return apiErr
-	case actionReplaceOverloaded:
-		return types.WithClaudeError(types.ClaudeError{
-			Type:    "overloaded_error",
-			Message: "Overloaded",
-		}, 529)
-	case actionReplaceOverloaded429:
-		return types.WithClaudeError(types.ClaudeError{
-			Type:    "overloaded_error",
-			Message: "Overloaded",
-		}, 429)
-	case actionReplaceInternalError:
-		return types.WithClaudeError(types.ClaudeError{
-			Type:    "api_error",
-			Message: "Internal server error",
-		}, apiErr.StatusCode)
+	var normalized *types.NewAPIError
+	status := apiErr.StatusCode
+	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
+		normalized = types.NewOpenAIError(errors.New("Overloaded"), types.ErrorCodeBadResponseStatusCode, status)
+	} else {
+		overloadedStatus := http.StatusServiceUnavailable
+		if info.RelayFormat == types.RelayFormatClaude {
+			overloadedStatus = 529
+		}
+		claudeRules := info.RelayFormat == types.RelayFormatClaude || (info.ChannelMeta != nil && IsClaudeUpstream(info.ApiType))
+		switch classifyUpstreamError(apiErr.Error(), status, claudeRules) {
+		case actionReplaceOverloaded:
+			normalized = types.WithClaudeError(types.ClaudeError{Type: "overloaded_error", Message: "Overloaded"}, overloadedStatus)
+		case actionReplaceOverloaded429:
+			normalized = types.WithClaudeError(types.ClaudeError{Type: "overloaded_error", Message: "Overloaded"}, http.StatusTooManyRequests)
+		case actionReplaceInternalError:
+			normalized = types.WithClaudeError(types.ClaudeError{Type: "api_error", Message: "Internal server error"}, status)
+		default:
+			return apiErr
+		}
 	}
-	return apiErr
+	common.SetContextKey(c, upstreamOriginalErrorKey, apiErr)
+	return normalized
 }

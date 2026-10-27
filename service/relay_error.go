@@ -71,9 +71,16 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		return
 	}
 	upstreamURLs := common.UpstreamAddresses(c)
-	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))
-	if ShouldDisableChannel(err) && channelError.AutoBan {
-		reason := err.MaskSensitiveErrorWithStatusCode(upstreamURLs...)
+	// The client may have received a normalized error; admins and channel
+	// disabling need what the upstream actually returned.
+	upstreamErr := err
+	if original, ok := common.GetContextKeyType[*types.NewAPIError](c, upstreamOriginalErrorKey); ok && original != nil {
+		upstreamErr = original
+		common.SetContextKey(c, upstreamOriginalErrorKey, (*types.NewAPIError)(nil))
+	}
+	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, upstreamErr.StatusCode, common.LocalLogPreview(upstreamErr.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))
+	if ShouldDisableChannel(upstreamErr) && channelError.AutoBan {
+		reason := upstreamErr.MaskSensitiveErrorWithStatusCode(upstreamURLs...)
 		gopool.Go(func() {
 			DisableChannel(channelError, reason)
 		})
@@ -92,6 +99,14 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other.SetPublic("error_type", err.GetErrorType())
 		other.SetPublic("error_code", err.GetErrorCode())
 		other.SetPublic("status_code", err.StatusCode)
+		if upstreamErr != err {
+			other.SetAdmin("upstream_error", map[string]any{
+				"status_code": upstreamErr.StatusCode,
+				"error_type":  upstreamErr.GetErrorType(),
+				"error_code":  upstreamErr.GetErrorCode(),
+				"message":     upstreamErr.MaskSensitiveError(upstreamURLs...),
+			})
+		}
 		AppendRelayLogAdminInfo(c, relayInfo, other)
 		AppendResponseModelLogInfo(relayInfo, other)
 		AppendTaskPluginContextAuditInfo(c, other)
