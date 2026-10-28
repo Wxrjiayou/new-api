@@ -38,8 +38,42 @@ func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
 		}
 		return false
 	}
+	name := strings.ToLower(k)
+	if _, blocked := blockedUpstreamHeaders[name]; blocked {
+		return false
+	}
+	for _, prefix := range blockedUpstreamHeaderPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
 	return true
 }
+
+// blockedUpstreamHeaders hides headers that reveal the upstream relay, proxy or
+// CDN, or that would override this gateway's own security and cache policy.
+var blockedUpstreamHeaders = map[string]struct{}{
+	"x-new-api-version":      {},
+	"x-client-request-id":    {},
+	"x-upstream-request-id":  {},
+	"x-served-by":            {},
+	"x-debug-tracking-id":    {},
+	"traceresponse":          {},
+	"1-request-id":           {},
+	"1-via":                  {},
+	"1-version":              {},
+	"x-frame-options":        {},
+	"x-content-type-options": {},
+	"referrer-policy":        {},
+	"pragma":                 {},
+	"expires":                {},
+	"nel":                    {},
+	"report-to":              {},
+	"via":                    {},
+	"server":                 {},
+}
+
+var blockedUpstreamHeaderPrefixes = []string{"access-control-", "cf-", "eo-"}
 
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	if c.Writer == nil {
