@@ -103,6 +103,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			if relayFormat != types.RelayFormatOpenAIRealtime {
 				c.Header("Content-Type", "application/json; charset=utf-8")
+				if retryAfter := service.UpstreamErrorRetryAfter(c, newAPIError); retryAfter != "" {
+					c.Header("Retry-After", retryAfter)
+				}
 			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:

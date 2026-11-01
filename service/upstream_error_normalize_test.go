@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -181,7 +182,7 @@ func TestClassifyUpstreamError_F2HTML(t *testing.T) {
 }
 
 func TestClassifyUpstreamError_UnknownPassthrough(t *testing.T) {
-	assert.Equal(t, actionPassthrough, classifyUpstreamError("some random error message", 500, true))
+	assert.Equal(t, actionPassthrough, classifyUpstreamError("some random error message", 504, true))
 }
 
 func TestClassifyUpstreamError_GWhitelistTakesPriorityOverAB(t *testing.T) {
@@ -299,6 +300,12 @@ func TestNormalizeUpstreamError(t *testing.T) {
 		{"claude html keeps status", types.RelayFormatClaude, claudeUpstream, makeAPIError("<html><body>502 Bad Gateway</body></html>", 502), 502, "api_error", "Internal server error"},
 		{"any upstream 429 is hidden", types.RelayFormatOpenAI, openAIUpstream, makeAPIError("Rate limit reached for org-123", 429), 429, "", "Overloaded"},
 		{"any upstream 503 is hidden", types.RelayFormatGemini, geminiUpstream, makeAPIError("The model is overloaded", 503), 503, "", "Overloaded"},
+		{"claude client upstream 401 gets 529", types.RelayFormatClaude, openAIUpstream, makeAPIError("Incorrect API key provided", 401), 529, "overloaded_error", "Overloaded"},
+		{"openai client upstream 401 gets 503", types.RelayFormatOpenAI, openAIUpstream, makeAPIError("invalid x-api-key", 401), 503, "overloaded_error", "Overloaded"},
+		{"upstream 404 gets 503", types.RelayFormatGemini, geminiUpstream, makeAPIError("models/gemini-x is not found for API version v1beta", 404), 503, "overloaded_error", "Overloaded"},
+		{"upstream 404 html page gets 529", types.RelayFormatClaude, claudeUpstream, makeAPIError("<html><body>404 Not Found</body></html>", 404), 529, "overloaded_error", "Overloaded"},
+		{"claude client upstream 500 gets 529", types.RelayFormatClaude, openAIUpstream, makeAPIError("The server had an error while processing your request", 500), 529, "overloaded_error", "Overloaded"},
+		{"openai client upstream 500 gets 503", types.RelayFormatOpenAI, openAIUpstream, makeAPIError("internal error", 500), 503, "overloaded_error", "Overloaded"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -311,6 +318,11 @@ func TestNormalizeUpstreamError(t *testing.T) {
 			if tt.wantType != "" {
 				assert.Equal(t, tt.wantType, result.ToClaudeError().Type)
 			}
+			wantRetryAfter := ""
+			if tt.wantMsg == "Overloaded" {
+				wantRetryAfter = "5"
+			}
+			assert.Equal(t, wantRetryAfter, UpstreamErrorRetryAfter(c, result))
 			original, ok := common.GetContextKeyType[*types.NewAPIError](c, upstreamOriginalErrorKey)
 			require.True(t, ok)
 			assert.Same(t, tt.err, original, "the upstream error is kept for admins")
@@ -328,8 +340,11 @@ func TestNormalizeUpstreamErrorLeavesOtherErrorsUnchanged(t *testing.T) {
 		{"context overflow passes through", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: openAIUpstream}, makeAPIError("prompt is too long", 400)},
 		{"claude-only rules skip openai upstreams", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, ChannelMeta: openAIUpstream}, makeAPIError("This key is only authorized for use with claude code", 403)},
 		{"gateway quota errors reach the client", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: openAIUpstream}, types.NewErrorWithStatusCode(errors.New("用户额度不足"), types.ErrorCodeInsufficientUserQuota, 403)},
-		{"no channel yet", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI}, makeAPIError("some random error", 500)},
+		{"no channel yet", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI}, makeAPIError("some random error", 400)},
 		{"no relay info", nil, makeAPIError("Your credit balance is too low", 400)},
+		{"tools fetch 404 is the client's page", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, RelayMode: relayconstant.RelayModeToolsFetch, ChannelMeta: openAIUpstream}, makeAPIError("page not found", 404)},
+		{"upstream 403 still passes through", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: openAIUpstream}, makeAPIError("Request blocked by content policy", 403)},
+		{"context overflow whitelist wins over 404", &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: openAIUpstream}, makeAPIError("prompt is too long: 250000 tokens", 404)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -340,6 +355,74 @@ func TestNormalizeUpstreamErrorLeavesOtherErrorsUnchanged(t *testing.T) {
 		})
 	}
 	assert.Nil(t, NormalizeUpstreamError(nil, nil, nil))
+}
+
+// Retry-After belongs to the overloaded error the client receives, not to an
+// error a later attempt returned after it.
+func TestUpstreamErrorRetryAfterFollowsTheFinalError(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, ChannelMeta: &relaycommon.ChannelMeta{ApiType: constant.APITypeOpenAI}}
+
+	overloaded := NormalizeUpstreamError(c, info, makeAPIError("internal error", http.StatusInternalServerError))
+	assert.Equal(t, "5", UpstreamErrorRetryAfter(c, overloaded))
+
+	passedOn := NormalizeUpstreamError(c, info, makeAPIError("prompt is too long", http.StatusBadRequest))
+	assert.Empty(t, UpstreamErrorRetryAfter(c, passedOn))
+
+	noChannel := types.NewError(errors.New("The model is currently unavailable, please try again later"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	assert.Empty(t, UpstreamErrorRetryAfter(c, noChannel))
+	assert.Empty(t, UpstreamErrorRetryAfter(c, nil))
+}
+
+// An upstream error the client still sees keeps its status code but loses the
+// identifiers that reveal the upstream; admins keep the original.
+func TestNormalizeUpstreamErrorRedactsPassedOnErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		want    string
+	}{
+		{"new-api relay request id", "upstream timeout (request id: 20261101123456789abcdef)", "upstream timeout"},
+		{"bedrock arn", "Model arn:aws:bedrock:us-east-1:123456789012:inference-profile/claude is not ready", "Model arn:*** is not ready"},
+		{"aws account id", "account 123456789012 is not authorized", "account *** is not authorized"},
+		{"aws sdk request id", "https response error StatusCode: 500, RequestID: 6f1c2a9e-1b2c-4d5e-8f90-123456789abc, InternalServerException", "https response error StatusCode: 500, RequestID: ***, InternalServerException"},
+		{"json trace id", `internal error {"trace_id":"abc123def456"}`, `internal error {"trace_id":"***"}`},
+		{"anthropic request id", "Internal server error req_011CUa1b2c3d4e5f6g7h8i9j", "Internal server error req_***"},
+		{"azure resource path", "resource /subscriptions/0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0/resourceGroups/prod-rg/providers/x failed", "resource /subscriptions/***/resourceGroups/***/providers/x failed"},
+		{"gcp project", "projects/my-gcp-project/locations/us-central1/publishers/google/models/gemini failed", "projects/***/locations/us-central1/publishers/google/models/gemini failed"},
+		{"bearer token", "rejected Bearer eyJhbGciOiJIUzI1NiJ9.payload", "rejected Bearer ***"},
+		{"openai style key", "key sk-proj-abcdefghijklmnop1234 expired", "key sk-*** expired"},
+	}
+	openAIUpstream := &relaycommon.ChannelMeta{ApiType: constant.APITypeOpenAI}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, ChannelMeta: openAIUpstream}
+			upstreamErr := types.WithOpenAIError(types.OpenAIError{Message: tt.message, Type: "server_error", Code: "server_error"}, http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
+			result := NormalizeUpstreamError(c, info, upstreamErr)
+			require.NotSame(t, upstreamErr, result)
+			assert.Equal(t, http.StatusGatewayTimeout, result.StatusCode)
+			assert.Empty(t, UpstreamErrorRetryAfter(c, result), "only overloaded errors carry Retry-After")
+			assert.Equal(t, tt.want, result.Error())
+			assert.Equal(t, tt.want, result.ToOpenAIError().Message)
+			assert.Equal(t, "server_error", result.ToOpenAIError().Type)
+			assert.True(t, types.IsSkipRetryError(result), "retry options are kept")
+			assert.Equal(t, tt.message, upstreamErr.Error(), "the upstream error is not modified")
+			original, ok := common.GetContextKeyType[*types.NewAPIError](c, upstreamOriginalErrorKey)
+			require.True(t, ok)
+			assert.Same(t, upstreamErr, original)
+		})
+	}
+
+	for _, message := range []string{
+		"The request id is required",
+		"input length 123456789012 exceeds the limit",
+		"see https://docs.example.org/projects",
+	} {
+		upstreamErr := makeAPIError(message, http.StatusGatewayTimeout)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		assert.Same(t, upstreamErr, NormalizeUpstreamError(c, &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, ChannelMeta: openAIUpstream}, upstreamErr), message)
+	}
 }
 
 // The client and the user's log see the normalized error, while admin_info and

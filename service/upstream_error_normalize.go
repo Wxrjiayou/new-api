@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,15 @@ import (
 // replaced, so ProcessChannelError can log it for admins and judge channel
 // disabling on what the upstream actually returned.
 const upstreamOriginalErrorKey constant.ContextKey = "upstream_original_error"
+
+// upstreamOverloadedErrorKey holds the overloaded error NormalizeUpstreamError
+// returned last. The relay sends Retry-After only when that error is the one
+// the client receives, so a later attempt's own error or a success never
+// carries it.
+const upstreamOverloadedErrorKey constant.ContextKey = "upstream_overloaded_error"
+
+// overloadedRetryAfterSeconds tells clients when to retry an overloaded error.
+const overloadedRetryAfterSeconds = "5"
 
 func IsClaudeUpstream(apiType int) bool {
 	switch apiType {
@@ -155,6 +165,14 @@ func classifyUpstreamError(message string, statusCode int, claudeRules bool) ups
 		}
 	}
 
+	// An upstream 401 or 404 is about the channel's key or model mapping, and
+	// an upstream 500 about the upstream itself; the client can fix none of
+	// them. A passed-on 401 makes Claude Code ask the user to log in again.
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError:
+		return actionReplaceOverloaded
+	}
+
 	if statusCode == http.StatusPaymentRequired {
 		return actionReplaceOverloaded
 	}
@@ -227,7 +245,10 @@ func classifyUpstreamError(message string, statusCode int, claudeRules bool) ups
 // NormalizeUpstreamError hides upstream errors that reveal the upstream's
 // balance, account or load behind a generic overloaded error that clients
 // retry. Claude clients get 529; other clients get 503, which every official
-// SDK retries. The replaced error is kept for ProcessChannelError.
+// SDK retries. Overloaded errors are sent with Retry-After, see
+// UpstreamErrorRetryAfter. An upstream error passed on keeps its status code
+// with the upstream identifiers redacted. The replaced error is kept for
+// ProcessChannelError.
 func NormalizeUpstreamError(c *gin.Context, info *relaycommon.RelayInfo, apiErr *types.NewAPIError) *types.NewAPIError {
 	// Errors the gateway raises itself, such as the user's own quota running
 	// out, are not upstream errors and must reach the client unchanged.
@@ -236,10 +257,16 @@ func NormalizeUpstreamError(c *gin.Context, info *relaycommon.RelayInfo, apiErr 
 	}
 
 	var normalized *types.NewAPIError
+	overloaded := false
 	status := apiErr.StatusCode
-	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
+	switch {
+	case status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable:
 		normalized = types.NewOpenAIError(errors.New("Overloaded"), types.ErrorCodeBadResponseStatusCode, status)
-	} else {
+		overloaded = true
+	case status == http.StatusNotFound && info.RelayMode == relayconstant.RelayModeToolsFetch:
+		// The page the client asked /v1/tools/fetch for does not exist.
+		normalized = redactUpstreamErrorMessage(apiErr)
+	default:
 		overloadedStatus := http.StatusServiceUnavailable
 		if info.RelayFormat == types.RelayFormatClaude {
 			overloadedStatus = 529
@@ -248,14 +275,93 @@ func NormalizeUpstreamError(c *gin.Context, info *relaycommon.RelayInfo, apiErr 
 		switch classifyUpstreamError(apiErr.Error(), status, claudeRules) {
 		case actionReplaceOverloaded:
 			normalized = types.WithClaudeError(types.ClaudeError{Type: "overloaded_error", Message: "Overloaded"}, overloadedStatus)
+			overloaded = true
 		case actionReplaceOverloaded429:
 			normalized = types.WithClaudeError(types.ClaudeError{Type: "overloaded_error", Message: "Overloaded"}, http.StatusTooManyRequests)
+			overloaded = true
 		case actionReplaceInternalError:
 			normalized = types.WithClaudeError(types.ClaudeError{Type: "api_error", Message: "Internal server error"}, status)
 		default:
-			return apiErr
+			normalized = redactUpstreamErrorMessage(apiErr)
 		}
 	}
+	if normalized == apiErr {
+		return apiErr
+	}
 	common.SetContextKey(c, upstreamOriginalErrorKey, apiErr)
+	if overloaded {
+		common.SetContextKey(c, upstreamOverloadedErrorKey, normalized)
+	}
 	return normalized
+}
+
+// UpstreamErrorRetryAfter returns the Retry-After value for the error the
+// client receives, or "" when it is not an overloaded error from
+// NormalizeUpstreamError.
+func UpstreamErrorRetryAfter(c *gin.Context, apiErr *types.NewAPIError) string {
+	overloaded, ok := common.GetContextKeyType[*types.NewAPIError](c, upstreamOverloadedErrorKey)
+	if !ok || overloaded == nil || overloaded != apiErr {
+		return ""
+	}
+	return overloadedRetryAfterSeconds
+}
+
+// upstreamErrorRedactions remove what an upstream error the client still sees
+// reveals about the upstream: relay request ids, cloud account and resource
+// identifiers, and credentials. Upstream addresses are masked later, when the
+// error is written, by kitutil.MaskSensitiveInfo.
+var upstreamErrorRedactions = []struct {
+	pattern     *regexp.Regexp
+	replacement string
+}{
+	// Relays built on new-api append their own request id, which names the relay.
+	{regexp.MustCompile(`\s*\(request id: [^)]*\)`), ""},
+	{regexp.MustCompile(`arn:aws[\w-]*:[^\s"'),;]+`), "arn:***"},
+	{regexp.MustCompile(`(?i)\b(account(?:[ _-]?id)?[\s:=#"']*)\d{12}\b`), "${1}***"},
+	{regexp.MustCompile(`(?i)\b((?:request|trace|correlation)[ _-]?id["']?\s*[:=]\s*["']?)[\w.:-]{6,}`), "${1}***"},
+	{regexp.MustCompile(`\breq_[A-Za-z0-9]{16,}\b`), "req_***"},
+	{regexp.MustCompile(`(?i)/subscriptions/[0-9a-f-]{36}`), "/subscriptions/***"},
+	{regexp.MustCompile(`(?i)/resourceGroups/[^/\s"']+`), "/resourceGroups/***"},
+	{regexp.MustCompile(`\bprojects/[^/\s"']+`), "projects/***"},
+	{regexp.MustCompile(`(?i)\bbearer\s+[\w.~+/=-]{8,}`), "Bearer ***"},
+	{regexp.MustCompile(`\bsk-[\w-]{16,}`), "sk-***"},
+}
+
+func redactUpstreamErrorText(text string) string {
+	for _, redaction := range upstreamErrorRedactions {
+		text = redaction.pattern.ReplaceAllString(text, redaction.replacement)
+	}
+	return text
+}
+
+// redactUpstreamErrorMessage returns apiErr when nothing needs redacting, and
+// otherwise a copy with the redacted message. The copy keeps the status code
+// and retry options; the OpenAI error a client receives is built from
+// RelayError, so its message is redacted too.
+func redactUpstreamErrorMessage(apiErr *types.NewAPIError) *types.NewAPIError {
+	message := apiErr.Error()
+	redacted := *apiErr
+	changed := false
+	if redactedMessage := redactUpstreamErrorText(message); redactedMessage != message {
+		redacted.Err = errors.New(redactedMessage)
+		changed = true
+	}
+	switch relayErr := apiErr.RelayError.(type) {
+	case types.OpenAIError:
+		if redactedMessage := redactUpstreamErrorText(relayErr.Message); redactedMessage != relayErr.Message {
+			relayErr.Message = redactedMessage
+			redacted.RelayError = relayErr
+			changed = true
+		}
+	case types.ClaudeError:
+		if redactedMessage := redactUpstreamErrorText(relayErr.Message); redactedMessage != relayErr.Message {
+			relayErr.Message = redactedMessage
+			redacted.RelayError = relayErr
+			changed = true
+		}
+	}
+	if !changed {
+		return apiErr
+	}
+	return &redacted
 }
