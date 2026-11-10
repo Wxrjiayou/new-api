@@ -338,6 +338,11 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 	if ExceedsMaxTokensLimit(textRequest.MaxTokens, textRequest.MaxTokensToSample) {
 		return nil, errors.New("max_tokens is invalid")
 	}
+	// Anthropic requires max_tokens >= 1. Reject an explicit zero here, before
+	// pass-through or the adaptor default can turn it into a billable request.
+	if lo.FromPtrOr(textRequest.MaxTokens, uint(1)) == 0 || lo.FromPtrOr(textRequest.MaxTokensToSample, uint(1)) == 0 {
+		return nil, errors.New("max_tokens: Input should be greater than or equal to 1")
+	}
 
 	//if textRequest.Stream {
 	//	relayInfo.IsStream = true

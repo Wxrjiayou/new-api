@@ -56,6 +56,29 @@ func TestMaxTokensBounds(t *testing.T) {
 		require.EqualValues(t, 8192, *req.MaxTokens)
 	})
 
+	t.Run("claude explicit zero max_tokens rejected", func(t *testing.T) {
+		for _, field := range []string{"max_tokens", "max_tokens_to_sample"} {
+			c := newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"`+field+`":0}`)
+			_, err := GetAndValidateClaudeRequest(c)
+			require.Error(t, err, field)
+			require.Equal(t, "max_tokens: Input should be greater than or equal to 1", err.Error())
+		}
+	})
+
+	t.Run("claude omitted max_tokens accepted", func(t *testing.T) {
+		c := newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`)
+		req, err := GetAndValidateClaudeRequest(c)
+		require.NoError(t, err)
+		require.Nil(t, req.MaxTokens)
+	})
+
+	t.Run("claude max_tokens of one accepted", func(t *testing.T) {
+		c := newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`)
+		req, err := GetAndValidateClaudeRequest(c)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, *req.MaxTokens)
+	})
+
 	t.Run("gemini maxOutputTokens overflow rejected", func(t *testing.T) {
 		c := newJSONContext(t, `{"contents":[{"parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":`+hugeN+`}}`)
 		_, err := GetAndValidateGeminiRequest(c)
