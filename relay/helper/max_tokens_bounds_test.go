@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -65,11 +66,23 @@ func TestMaxTokensBounds(t *testing.T) {
 		}
 	})
 
-	t.Run("claude omitted max_tokens accepted", func(t *testing.T) {
+	t.Run("claude count_tokens validator accepts omitted max_tokens", func(t *testing.T) {
 		c := newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`)
 		req, err := GetAndValidateClaudeRequest(c)
 		require.NoError(t, err)
 		require.Nil(t, req.MaxTokens)
+	})
+
+	t.Run("claude messages relay requires max_tokens", func(t *testing.T) {
+		c := newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`)
+		_, err := GetAndValidateRequest(c, types.RelayFormatClaude)
+		require.Error(t, err)
+		require.Equal(t, "max_tokens: Field required", err.Error())
+
+		c = newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`)
+		req, err := GetAndValidateRequest(c, types.RelayFormatClaude)
+		require.NoError(t, err)
+		require.NotNil(t, req)
 	})
 
 	t.Run("claude max_tokens of one accepted", func(t *testing.T) {

@@ -45,7 +45,18 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 			request, err = GetAndValidateGeminiRequest(c)
 		}
 	case types.RelayFormatClaude:
-		request, err = GetAndValidateClaudeRequest(c)
+		claudeRequest, claudeErr := GetAndValidateClaudeRequest(c)
+		if claudeErr != nil {
+			return nil, claudeErr
+		}
+		// Anthropic requires max_tokens on Messages. Reject a missing value here
+		// instead of letting the adaptor default or a pass-through upstream accept
+		// it. count_tokens calls GetAndValidateClaudeRequest directly and takes no
+		// max_tokens, so it stays exempt.
+		if claudeRequest.MaxTokens == nil && claudeRequest.MaxTokensToSample == nil {
+			return nil, errors.New("max_tokens: Field required")
+		}
+		request = claudeRequest
 	case types.RelayFormatOpenAIResponses:
 		request, err = GetAndValidateResponsesRequest(c)
 	case types.RelayFormatOpenAIResponsesCompaction:
