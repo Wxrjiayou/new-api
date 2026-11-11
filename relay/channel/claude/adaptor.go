@@ -34,6 +34,11 @@ func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayIn
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
+	if shouldNormalizeTools(info) {
+		if apiErr := rejectUnsupportedServerTools(request); apiErr != nil {
+			return nil, apiErr
+		}
+	}
 	if request.MaxTokens != nil && *request.MaxTokens == 0 {
 		request.MaxTokens = nil
 	}

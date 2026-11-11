@@ -460,6 +460,13 @@ func shouldNormalizeHeaders(info *relaycommon.RelayInfo) bool {
 	return info.ChannelSetting.NormalizeClaudeHeaders || info.ChannelSetting.ForceClaudeFormat
 }
 
+func shouldNormalizeTools(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	return info.ChannelSetting.NormalizeClaudeTools || info.ChannelSetting.ForceClaudeFormat
+}
+
 func shouldApplyClaudeNormalize(info *relaycommon.RelayInfo) bool {
 	return shouldNormalizeBody(info) || shouldNormalizeHeaders(info)
 }
