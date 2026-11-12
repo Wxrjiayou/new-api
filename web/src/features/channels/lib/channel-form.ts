@@ -265,6 +265,7 @@ export const channelFormSchema = z
     force_claude_format: z.boolean().optional(),
     normalize_claude_body: z.boolean().optional(),
     normalize_claude_headers: z.boolean().optional(),
+    normalize_claude_tools: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
     proxy: z
       .string()
@@ -465,6 +466,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   force_claude_format: false,
   normalize_claude_body: false,
   normalize_claude_headers: false,
+  normalize_claude_tools: false,
   thinking_to_content: false,
   proxy: '',
   http_protocol: HTTP_PROTOCOL_AUTO,
@@ -515,6 +517,7 @@ export function transformChannelToFormDefaults(
     force_claude_format: false,
     normalize_claude_body: false,
     normalize_claude_headers: false,
+    normalize_claude_tools: false,
     thinking_to_content: false,
     proxy: '',
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
@@ -540,6 +543,7 @@ export function transformChannelToFormDefaults(
         force_claude_format: parsed.force_claude_format || false,
         normalize_claude_body: parsed.normalize_claude_body || false,
         normalize_claude_headers: parsed.normalize_claude_headers || false,
+        normalize_claude_tools: parsed.normalize_claude_tools || false,
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
         http_protocol: protocol,
@@ -683,6 +687,7 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     force_claude_format: formData.force_claude_format || false,
     normalize_claude_body: formData.normalize_claude_body || false,
     normalize_claude_headers: formData.normalize_claude_headers || false,
+    normalize_claude_tools: formData.normalize_claude_tools || false,
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled:

@@ -300,6 +300,7 @@ const SENSITIVE_FORM_FIELDS = [
   'force_claude_format',
   'normalize_claude_body',
   'normalize_claude_headers',
+  'normalize_claude_tools',
   'thinking_to_content',
   'proxy',
   'http_protocol',
@@ -2040,6 +2041,29 @@ export function ChannelMutateDrawer({
               <FormDescription>
                 {t(
                   'Replace upstream headers with official Anthropic API headers (request-id, org-id, rate-limit)'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <Switch
+                disabled={sensitiveLocked || currentForceClaudeFormat}
+                checked={field.value || currentForceClaudeFormat}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name='normalize_claude_tools'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between px-4 py-3'>
+            <div className='space-y-0.5'>
+              <FormLabel>{t('Normalize Claude Tools')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Reject server-side tools unsupported by Bedrock (web_search, code_execution, etc.)'
                 )}
               </FormDescription>
             </div>
