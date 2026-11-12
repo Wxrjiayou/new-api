@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -12,10 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -335,11 +338,15 @@ func normalizeClaudeBody(data []byte) []byte {
 		data = setBytes(data, "container", nil)
 	}
 	gjson.GetBytes(data, "content").ForEach(func(key, value gjson.Result) bool {
+		idx := key.String()
 		if value.Get("type").String() == "thinking" && value.Get("signature").String() != "" {
 			sig := value.Get("signature").String()
 			if cleaned := stripMaxSignatureFields(sig); cleaned != sig {
-				data = setBytes(data, "content."+key.String()+".signature", cleaned)
+				data = setBytes(data, "content."+idx+".signature", cleaned)
 			}
+		}
+		if value.Get("type").String() == "tool_use" {
+			data = deleteBytes(data, "content."+idx+".caller")
 		}
 		return true
 	})
@@ -390,6 +397,11 @@ func upstreamHeader(resp *http.Response, name string) string {
 
 func setNormalizedHeaders(c *gin.Context, httpResp *http.Response, info *relaycommon.RelayInfo) {
 	if c.Writer == nil {
+		return
+	}
+
+	// Bedrock responses carry none of the Claude API-specific headers.
+	if shouldBedrockFormat(info) {
 		return
 	}
 
@@ -506,9 +518,7 @@ func bedrockOverlayBody(data []byte) []byte {
 	if id := gjson.GetBytes(data, "id").String(); strings.HasPrefix(id, "msg_01") {
 		data = setBytes(data, "id", rewriteIDToBedrock(id, "msg_01", bedrockMsgPrefix))
 	}
-	if gjson.GetBytes(data, "stop_details").Type == gjson.Null {
-		// already null from Claude normalize, keep it
-	} else if !gjson.GetBytes(data, "stop_details").Exists() {
+	if !gjson.GetBytes(data, "stop_details").Exists() {
 		data = setBytes(data, "stop_details", nil)
 	}
 	data = deleteBytes(data, "container")
@@ -523,6 +533,12 @@ func bedrockOverlayBody(data []byte) []byte {
 	}
 	if !gjson.GetBytes(data, "usage.iterations").Exists() {
 		data = setBytes(data, "usage.iterations", nil)
+	}
+	if !gjson.GetBytes(data, "usage.cache_creation").Exists() {
+		data = setBytes(data, "usage.cache_creation", map[string]int{
+			"ephemeral_5m_input_tokens": 0,
+			"ephemeral_1h_input_tokens": 0,
+		})
 	}
 	if !gjson.GetBytes(data, "usage.output_tokens_details").Exists() {
 		data = setBytes(data, "usage.output_tokens_details", nil)
@@ -561,34 +577,77 @@ func bedrockOverlayStreamEvent(data string, eventType string) string {
 		if !gjson.Get(data, "message.usage.service_tier").Exists() {
 			data = setStr(data, "message.usage.service_tier", "standard")
 		}
+		if !gjson.Get(data, "message.usage.cache_creation").Exists() {
+			data = setStr(data, "message.usage.cache_creation", map[string]int{
+				"ephemeral_5m_input_tokens": 0,
+				"ephemeral_1h_input_tokens": 0,
+			})
+		}
 	case "content_block_start":
 		if gjson.Get(data, "content_block.type").String() == "tool_use" {
 			if tid := gjson.Get(data, "content_block.id").String(); strings.HasPrefix(tid, "toolu_01") {
 				data = setStr(data, "content_block.id", rewriteIDToBedrock(tid, "toolu_01", bedrockToolPrefix))
 			}
 		}
-		if gjson.Get(data, "content_block.type").String() == "text" && !gjson.Get(data, "content_block.citations").Exists() {
-			data = setStr(data, "content_block.citations", nil)
-		}
 	case "message_delta":
 		if !gjson.Get(data, "delta.stop_details").Exists() {
 			data = setStr(data, "delta.stop_details", nil)
 		}
 		data = deleteStr(data, "delta.container")
-		if !gjson.Get(data, "delta.usage.service_tier").Exists() && gjson.Get(data, "usage").Exists() {
-			data = setStr(data, "usage.service_tier", "standard")
-		}
-	case "message_stop":
-		if !gjson.Get(data, "amazon-bedrock-invocationMetrics").Exists() {
-			data = setStr(data, "amazon-bedrock-invocationMetrics", map[string]any{
-				"inputTokenCount":           0,
-				"outputTokenCount":          0,
-				"invocationLatency":         0,
-				"firstByteLatency":          0,
-				"cacheReadInputTokenCount":  0,
-				"cacheWriteInputTokenCount": 0,
-			})
+		if gjson.Get(data, "usage").Exists() {
+			if !gjson.Get(data, "usage.service_tier").Exists() {
+				data = setStr(data, "usage.service_tier", "standard")
+			}
+			if !gjson.Get(data, "usage.cache_creation").Exists() {
+				data = setStr(data, "usage.cache_creation", map[string]int{
+					"ephemeral_5m_input_tokens": 0,
+					"ephemeral_1h_input_tokens": 0,
+				})
+			}
 		}
 	}
 	return data
+}
+
+// bedrockMessageStop builds a message_stop event with real invocation metrics.
+func bedrockMessageStop(inputTokens, outputTokens, cacheRead, cacheWrite int, firstByteMs, totalMs int64) string {
+	data := `{"type":"message_stop"}`
+	data = setStr(data, "amazon-bedrock-invocationMetrics", map[string]any{
+		"inputTokenCount":           inputTokens,
+		"outputTokenCount":          outputTokens,
+		"invocationLatency":         totalMs,
+		"firstByteLatency":          firstByteMs,
+		"cacheReadInputTokenCount":  cacheRead,
+		"cacheWriteInputTokenCount": cacheWrite,
+	})
+	return data
+}
+
+func wrapBedrockRequestError(apiErr *types.NewAPIError) *types.NewAPIError {
+	if apiErr == nil {
+		return nil
+	}
+	var exType string
+	switch {
+	case apiErr.StatusCode == http.StatusBadRequest:
+		exType = "ValidationException"
+	case apiErr.StatusCode == http.StatusForbidden || apiErr.StatusCode == http.StatusUnauthorized:
+		exType = "AccessDeniedException"
+	case apiErr.StatusCode == http.StatusNotFound:
+		exType = "ResourceNotFoundException"
+	case apiErr.StatusCode == http.StatusTooManyRequests:
+		exType = "ThrottlingException"
+	case apiErr.StatusCode >= 500:
+		exType = "InternalServerException"
+	default:
+		exType = "ValidationException"
+	}
+	reqID := uuid.New().String()
+	msg := apiErr.Error()
+	bedrockMsg := fmt.Sprintf("operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
+		apiErr.StatusCode, reqID, exType, msg)
+	wrapped := *apiErr
+	wrapped.Err = errors.New(bedrockMsg)
+	wrapped.RelayError = types.ClaudeError{Message: bedrockMsg}
+	return &wrapped
 }

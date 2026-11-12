@@ -36,6 +36,9 @@ func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayIn
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
 	if shouldNormalizeTools(info) {
 		if apiErr := rejectUnsupportedServerTools(request); apiErr != nil {
+			if shouldBedrockFormat(info) {
+				apiErr = wrapBedrockRequestError(apiErr)
+			}
 			return nil, apiErr
 		}
 	}

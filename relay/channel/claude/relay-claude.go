@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -125,7 +126,11 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			data = normalizeClaudeStreamEvent(data, claudeResponse.Type)
 		}
 		if shouldBedrockFormat(info) {
-			data = bedrockOverlayStreamEvent(data, claudeResponse.Type)
+			if claudeResponse.Type == "message_stop" {
+				data = buildBedrockMessageStopFromInfo(info, claudeInfo)
+			} else {
+				data = bedrockOverlayStreamEvent(data, claudeResponse.Type)
+			}
 		}
 		countClaudeStreamBillableTools(info, &claudeResponse)
 		helper.ClaudeChunkData(c, claudeResponse, data)
@@ -399,6 +404,23 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	return claudeInfo.Usage, nil
 }
 
+func buildBedrockMessageStopFromInfo(info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) string {
+	var inputTokens, outputTokens, cacheRead, cacheWrite int
+	if claudeInfo != nil && claudeInfo.Usage != nil {
+		inputTokens = claudeInfo.Usage.PromptTokens
+		outputTokens = claudeInfo.Usage.CompletionTokens
+		cacheRead = claudeInfo.Usage.PromptTokensDetails.CachedTokens
+		cacheWrite = claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens
+	}
+	now := time.Now()
+	totalMs := now.Sub(info.StartTime).Milliseconds()
+	var firstByteMs int64
+	if info.HasSendResponse() {
+		firstByteMs = info.FirstResponseTime.Sub(info.StartTime).Milliseconds()
+	}
+	return bedrockMessageStop(inputTokens, outputTokens, cacheRead, cacheWrite, firstByteMs, totalMs)
+}
+
 // closeTruncatedClaudeStream ends a Claude stream that the upstream cut off
 // after output started: without message_stop, clients such as Claude Code
 // treat the reply as failed. Idle timeouts and client disconnects are left alone.
@@ -430,7 +452,7 @@ func closeTruncatedClaudeStream(c *gin.Context, info *relaycommon.RelayInfo, cla
 	}
 	msgStop := `{"type":"message_stop"}`
 	if shouldBedrockFormat(info) {
-		msgStop = bedrockOverlayStreamEvent(msgStop, "message_stop")
+		msgStop = buildBedrockMessageStopFromInfo(info, claudeInfo)
 	}
 	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_stop"}, msgStop)
 }
