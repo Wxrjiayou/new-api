@@ -2847,6 +2847,8 @@
     "Normalize Claude Headers": "归一化 Claude 响应头",
     "Normalize Claude Tools": "归一化 Claude 工具",
     "Reject server-side tools unsupported by Bedrock (web_search, code_execution, etc.)": "拒绝 Bedrock 不支持的服务端工具（web_search、code_execution 等）",
+    "Force Bedrock Format": "强制 Bedrock 格式",
+    "Rewrite responses to match AWS Bedrock format (ID prefixes, error format, field style)": "将响应改写为 AWS Bedrock 格式（ID 前缀、错误格式、字段风格）",
     "Normalize response to official Anthropic API format (remove Max subscription artifacts)": "将响应归一化为 Anthropic 官方 API 格式（去除 Max 订阅痕迹）",
     "Remove non-official fields from response body (iterations, context_management, etc.)": "移除响应体中的非官方字段（iterations、context_management 等）",
     "Replace upstream headers with official Anthropic API headers (request-id, org-id, rate-limit)": "将上游响应头替换为 Anthropic 官方 API 响应头（request-id、org-id、rate-limit）",

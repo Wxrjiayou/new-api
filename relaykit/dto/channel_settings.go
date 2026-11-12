@@ -24,6 +24,7 @@ type ChannelSettings struct {
 	NormalizeClaudeBody       bool   `json:"normalize_claude_body,omitempty"`
 	NormalizeClaudeHeaders    bool   `json:"normalize_claude_headers,omitempty"`
 	NormalizeClaudeTools      bool   `json:"normalize_claude_tools,omitempty"`
+	ForceBedrockFormat        bool   `json:"force_bedrock_format,omitempty"`
 	// TaskExtendPluginKeys lists the task plugins a New API channel (type 60)
 	// is extended with. The upstream gateway may host many plugins, so the
 	// channel serves every listed plugin's models while the request still pins

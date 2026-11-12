@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // upstreamOriginalErrorKey holds the upstream error NormalizeUpstreamError
@@ -292,6 +294,9 @@ func NormalizeUpstreamError(c *gin.Context, info *relaycommon.RelayInfo, apiErr 
 	if overloaded {
 		common.SetContextKey(c, upstreamOverloadedErrorKey, normalized)
 	}
+	if info.ChannelMeta != nil && info.ChannelSetting.ForceBedrockFormat {
+		normalized = wrapBedrockErrorFormat(normalized)
+	}
 	return normalized
 }
 
@@ -364,4 +369,36 @@ func redactUpstreamErrorMessage(apiErr *types.NewAPIError) *types.NewAPIError {
 		return apiErr
 	}
 	return &redacted
+}
+
+func bedrockExceptionType(status int) string {
+	switch {
+	case status == http.StatusBadRequest:
+		return "ValidationException"
+	case status == http.StatusForbidden || status == http.StatusUnauthorized:
+		return "AccessDeniedException"
+	case status == http.StatusNotFound:
+		return "ResourceNotFoundException"
+	case status == http.StatusTooManyRequests:
+		return "ThrottlingException"
+	case status >= 500:
+		return "InternalServerException"
+	default:
+		return "ValidationException"
+	}
+}
+
+func wrapBedrockErrorFormat(apiErr *types.NewAPIError) *types.NewAPIError {
+	if apiErr == nil {
+		return nil
+	}
+	requestID := uuid.New().String()
+	exType := bedrockExceptionType(apiErr.StatusCode)
+	msg := apiErr.Error()
+	bedrockMsg := fmt.Sprintf("operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
+		apiErr.StatusCode, requestID, exType, msg)
+	wrapped := *apiErr
+	wrapped.Err = errors.New(bedrockMsg)
+	wrapped.RelayError = types.ClaudeError{Message: bedrockMsg}
+	return &wrapped
 }

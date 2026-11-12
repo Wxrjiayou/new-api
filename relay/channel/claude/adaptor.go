@@ -39,6 +39,9 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 			return nil, apiErr
 		}
 	}
+	if shouldBedrockFormat(info) {
+		restoreBedrockIDs(request)
+	}
 	if request.MaxTokens != nil && *request.MaxTokens == 0 {
 		request.MaxTokens = nil
 	}

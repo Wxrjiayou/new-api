@@ -48,3 +48,24 @@ func extractToolType(tool any) string {
 	}
 	return ""
 }
+
+func restoreBedrockIDs(request *dto.ClaudeRequest) {
+	for i := range request.Messages {
+		blocks, ok := request.Messages[i].Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, block := range blocks {
+			m, ok := block.(map[string]any)
+			if !ok {
+				continue
+			}
+			if tid, ok := m["tool_use_id"].(string); ok {
+				m["tool_use_id"] = rewriteIDFromBedrock(tid, bedrockToolPrefix, "toolu_01")
+			}
+			if id, ok := m["id"].(string); ok {
+				m["id"] = rewriteIDFromBedrock(id, bedrockToolPrefix, "toolu_01")
+			}
+		}
+	}
+}

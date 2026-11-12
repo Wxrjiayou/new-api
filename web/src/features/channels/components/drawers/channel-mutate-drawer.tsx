@@ -301,6 +301,7 @@ const SENSITIVE_FORM_FIELDS = [
   'normalize_claude_body',
   'normalize_claude_headers',
   'normalize_claude_tools',
+  'force_bedrock_format',
   'thinking_to_content',
   'proxy',
   'http_protocol',
@@ -2071,6 +2072,29 @@ export function ChannelMutateDrawer({
               <Switch
                 disabled={sensitiveLocked || currentForceClaudeFormat}
                 checked={field.value || currentForceClaudeFormat}
+                onCheckedChange={field.onChange}
+              />
+            </FormControl>
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={form.control}
+        name='force_bedrock_format'
+        render={({ field }) => (
+          <FormItem className='flex items-center justify-between px-4 py-3'>
+            <div className='space-y-0.5'>
+              <FormLabel>{t('Force Bedrock Format')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Rewrite responses to match AWS Bedrock format (ID prefixes, error format, field style)'
+                )}
+              </FormDescription>
+            </div>
+            <FormControl>
+              <Switch
+                disabled={sensitiveLocked}
+                checked={field.value}
                 onCheckedChange={field.onChange}
               />
             </FormControl>

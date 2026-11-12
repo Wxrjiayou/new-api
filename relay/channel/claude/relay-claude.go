@@ -124,6 +124,9 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		if shouldNormalizeBody(info) {
 			data = normalizeClaudeStreamEvent(data, claudeResponse.Type)
 		}
+		if shouldBedrockFormat(info) {
+			data = bedrockOverlayStreamEvent(data, claudeResponse.Type)
+		}
 		countClaudeStreamBillableTools(info, &claudeResponse)
 		helper.ClaudeChunkData(c, claudeResponse, data)
 	} else if info.RelayFormat == types.RelayFormatOpenAI {
@@ -420,9 +423,16 @@ func closeTruncatedClaudeStream(c *gin.Context, info *relaycommon.RelayInfo, cla
 		if shouldNormalizeBody(info) {
 			delta = normalizeClaudeStreamEvent(delta, "message_delta")
 		}
+		if shouldBedrockFormat(info) {
+			delta = bedrockOverlayStreamEvent(delta, "message_delta")
+		}
 		helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_delta"}, delta)
 	}
-	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_stop"}, `{"type":"message_stop"}`)
+	msgStop := `{"type":"message_stop"}`
+	if shouldBedrockFormat(info) {
+		msgStop = bedrockOverlayStreamEvent(msgStop, "message_stop")
+	}
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_stop"}, msgStop)
 }
 
 func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo, httpResp *http.Response, data []byte) *types.NewAPIError {
@@ -490,6 +500,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			responseData = normalizeClaudeBody(data)
 		} else {
 			responseData = data
+		}
+		if shouldBedrockFormat(info) {
+			responseData = bedrockOverlayBody(responseData)
 		}
 	case types.RelayFormatGemini:
 		{

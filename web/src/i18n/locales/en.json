@@ -2847,6 +2847,8 @@
     "Normalize Claude Headers": "Normalize Claude Headers",
     "Normalize Claude Tools": "Normalize Claude Tools",
     "Reject server-side tools unsupported by Bedrock (web_search, code_execution, etc.)": "Reject server-side tools unsupported by Bedrock (web_search, code_execution, etc.)",
+    "Force Bedrock Format": "Force Bedrock Format",
+    "Rewrite responses to match AWS Bedrock format (ID prefixes, error format, field style)": "Rewrite responses to match AWS Bedrock format (ID prefixes, error format, field style)",
     "Normalize response to official Anthropic API format (remove Max subscription artifacts)": "Normalize response to official Anthropic API format (remove Max subscription artifacts)",
     "Remove non-official fields from response body (iterations, context_management, etc.)": "Remove non-official fields from response body (iterations, context_management, etc.)",
     "Replace upstream headers with official Anthropic API headers (request-id, org-id, rate-limit)": "Replace upstream headers with official Anthropic API headers (request-id, org-id, rate-limit)",

@@ -450,21 +450,28 @@ func shouldNormalizeBody(info *relaycommon.RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	return info.ChannelSetting.NormalizeClaudeBody || info.ChannelSetting.ForceClaudeFormat
+	return info.ChannelSetting.NormalizeClaudeBody || info.ChannelSetting.ForceClaudeFormat || info.ChannelSetting.ForceBedrockFormat
 }
 
 func shouldNormalizeHeaders(info *relaycommon.RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	return info.ChannelSetting.NormalizeClaudeHeaders || info.ChannelSetting.ForceClaudeFormat
+	return info.ChannelSetting.NormalizeClaudeHeaders || info.ChannelSetting.ForceClaudeFormat || info.ChannelSetting.ForceBedrockFormat
 }
 
 func shouldNormalizeTools(info *relaycommon.RelayInfo) bool {
 	if info == nil || info.ChannelMeta == nil {
 		return false
 	}
-	return info.ChannelSetting.NormalizeClaudeTools || info.ChannelSetting.ForceClaudeFormat
+	return info.ChannelSetting.NormalizeClaudeTools || info.ChannelSetting.ForceClaudeFormat || info.ChannelSetting.ForceBedrockFormat
+}
+
+func shouldBedrockFormat(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	return info.ChannelSetting.ForceBedrockFormat
 }
 
 func shouldApplyClaudeNormalize(info *relaycommon.RelayInfo) bool {
@@ -473,4 +480,115 @@ func shouldApplyClaudeNormalize(info *relaycommon.RelayInfo) bool {
 
 func IsStreamHeaderAllowed(name string) bool {
 	return streamHeaderWhitelist[strings.ToLower(name)]
+}
+
+// --- Bedrock format overlay ---
+// Applied after Claude normalization to make MAX responses match AWS Bedrock.
+
+const bedrockMsgPrefix = "msg_bdrk_01"
+const bedrockToolPrefix = "toolu_bdrk_01"
+
+func rewriteIDToBedrock(id string, origPrefix, bedrockPrefix string) string {
+	if strings.HasPrefix(id, origPrefix) {
+		return bedrockPrefix + id[len(origPrefix):]
+	}
+	return id
+}
+
+func rewriteIDFromBedrock(id string, bedrockPrefix, origPrefix string) string {
+	if strings.HasPrefix(id, bedrockPrefix) {
+		return origPrefix + id[len(bedrockPrefix):]
+	}
+	return id
+}
+
+func bedrockOverlayBody(data []byte) []byte {
+	if id := gjson.GetBytes(data, "id").String(); strings.HasPrefix(id, "msg_01") {
+		data = setBytes(data, "id", rewriteIDToBedrock(id, "msg_01", bedrockMsgPrefix))
+	}
+	if gjson.GetBytes(data, "stop_details").Type == gjson.Null {
+		// already null from Claude normalize, keep it
+	} else if !gjson.GetBytes(data, "stop_details").Exists() {
+		data = setBytes(data, "stop_details", nil)
+	}
+	data = deleteBytes(data, "container")
+	if gjson.GetBytes(data, "usage.inference_geo").Exists() {
+		data = setBytes(data, "usage.inference_geo", "not_available")
+	}
+	if !gjson.GetBytes(data, "usage.service_tier").Exists() {
+		data = setBytes(data, "usage.service_tier", "standard")
+	}
+	if gjson.GetBytes(data, "usage.speed").Type == gjson.Null || !gjson.GetBytes(data, "usage.speed").Exists() {
+		data = setBytes(data, "usage.speed", nil)
+	}
+	if !gjson.GetBytes(data, "usage.iterations").Exists() {
+		data = setBytes(data, "usage.iterations", nil)
+	}
+	if !gjson.GetBytes(data, "usage.output_tokens_details").Exists() {
+		data = setBytes(data, "usage.output_tokens_details", nil)
+	}
+	if !gjson.GetBytes(data, "usage.server_tool_use").Exists() {
+		data = setBytes(data, "usage.server_tool_use", nil)
+	}
+	gjson.GetBytes(data, "content").ForEach(func(key, value gjson.Result) bool {
+		idx := key.String()
+		if value.Get("type").String() == "tool_use" {
+			if tid := value.Get("id").String(); strings.HasPrefix(tid, "toolu_01") {
+				data = setBytes(data, "content."+idx+".id", rewriteIDToBedrock(tid, "toolu_01", bedrockToolPrefix))
+			}
+		}
+		if value.Get("type").String() == "text" && !value.Get("citations").Exists() {
+			data = setBytes(data, "content."+idx+".citations", nil)
+		}
+		return true
+	})
+	return data
+}
+
+func bedrockOverlayStreamEvent(data string, eventType string) string {
+	switch eventType {
+	case "message_start":
+		if id := gjson.Get(data, "message.id").String(); strings.HasPrefix(id, "msg_01") {
+			data = setStr(data, "message.id", rewriteIDToBedrock(id, "msg_01", bedrockMsgPrefix))
+		}
+		if !gjson.Get(data, "message.stop_details").Exists() {
+			data = setStr(data, "message.stop_details", nil)
+		}
+		data = deleteStr(data, "message.container")
+		if gjson.Get(data, "message.usage.inference_geo").Exists() {
+			data = setStr(data, "message.usage.inference_geo", "not_available")
+		}
+		if !gjson.Get(data, "message.usage.service_tier").Exists() {
+			data = setStr(data, "message.usage.service_tier", "standard")
+		}
+	case "content_block_start":
+		if gjson.Get(data, "content_block.type").String() == "tool_use" {
+			if tid := gjson.Get(data, "content_block.id").String(); strings.HasPrefix(tid, "toolu_01") {
+				data = setStr(data, "content_block.id", rewriteIDToBedrock(tid, "toolu_01", bedrockToolPrefix))
+			}
+		}
+		if gjson.Get(data, "content_block.type").String() == "text" && !gjson.Get(data, "content_block.citations").Exists() {
+			data = setStr(data, "content_block.citations", nil)
+		}
+	case "message_delta":
+		if !gjson.Get(data, "delta.stop_details").Exists() {
+			data = setStr(data, "delta.stop_details", nil)
+		}
+		data = deleteStr(data, "delta.container")
+		if !gjson.Get(data, "delta.usage.service_tier").Exists() && gjson.Get(data, "usage").Exists() {
+			data = setStr(data, "usage.service_tier", "standard")
+		}
+	case "message_stop":
+		if !gjson.Get(data, "amazon-bedrock-invocationMetrics").Exists() {
+			data = setStr(data, "amazon-bedrock-invocationMetrics", map[string]any{
+				"inputTokenCount":           0,
+				"outputTokenCount":          0,
+				"invocationLatency":         0,
+				"firstByteLatency":          0,
+				"cacheReadInputTokenCount":  0,
+				"cacheWriteInputTokenCount": 0,
+			})
+		}
+	}
+	return data
 }
