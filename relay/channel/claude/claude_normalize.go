@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -650,8 +649,5 @@ func WrapBedrockRequestError(apiErr *types.NewAPIError) *types.NewAPIError {
 	msg := apiErr.Error()
 	bedrockMsg := fmt.Sprintf("operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
 		apiErr.StatusCode, reqID, exType, msg)
-	wrapped := *apiErr
-	wrapped.Err = errors.New(bedrockMsg)
-	wrapped.RelayError = types.ClaudeError{Message: bedrockMsg}
-	return &wrapped
+	return types.WithClaudeError(types.ClaudeError{Message: bedrockMsg}, apiErr.StatusCode)
 }
