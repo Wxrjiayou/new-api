@@ -37,7 +37,7 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	if shouldNormalizeTools(info) {
 		if apiErr := rejectUnsupportedServerTools(request); apiErr != nil {
 			if shouldBedrockFormat(info) {
-				apiErr = wrapBedrockRequestError(apiErr)
+				apiErr = WrapBedrockRequestError(apiErr)
 			}
 			return nil, apiErr
 		}

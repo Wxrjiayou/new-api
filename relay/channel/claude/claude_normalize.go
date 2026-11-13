@@ -627,7 +627,7 @@ func bedrockMessageStop(inputTokens, outputTokens, cacheRead, cacheWrite int, fi
 	return data
 }
 
-func wrapBedrockRequestError(apiErr *types.NewAPIError) *types.NewAPIError {
+func WrapBedrockRequestError(apiErr *types.NewAPIError) *types.NewAPIError {
 	if apiErr == nil {
 		return nil
 	}
