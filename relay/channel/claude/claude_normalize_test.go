@@ -14,7 +14,7 @@ import (
 func TestNormalizeClaudeBody_Full(t *testing.T) {
 	input := `{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[{"type":"text","text":"Hi"}],"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"service_tier":"standard","inference_geo":"not_available","iterations":[{"input_tokens":8,"output_tokens":16}]},"input_transformations":[],"diagnostics":null,"context_management":{"applied_edits":[]}}`
 
-	result := normalizeClaudeBody([]byte(input))
+	result := normalizeClaudeBody([]byte(input), false)
 
 	require.False(t, gjson.GetBytes(result, "usage.iterations").Exists(), "iterations removed")
 	require.False(t, gjson.GetBytes(result, "usage.cache_creation").Exists(), "usage.cache_creation removed")
@@ -34,7 +34,7 @@ func TestNormalizeClaudeBody_Full(t *testing.T) {
 func TestNormalizeClaudeBody_AlreadyOfficial(t *testing.T) {
 	input := `{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","container":null,"usage":{"input_tokens":8,"output_tokens":16,"service_tier":"standard","inference_geo":"global"}}`
 
-	result := normalizeClaudeBody([]byte(input))
+	result := normalizeClaudeBody([]byte(input), false)
 
 	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
 	assert.True(t, gjson.GetBytes(result, "container").Exists())
@@ -45,7 +45,7 @@ func TestNormalizeClaudeBody_AlreadyOfficial(t *testing.T) {
 func TestNormalizeClaudeBody_NoIterationsNoContextMgmt(t *testing.T) {
 	input := `{"usage":{"input_tokens":8,"output_tokens":16,"service_tier":"standard","inference_geo":"not_available"}}`
 
-	result := normalizeClaudeBody([]byte(input))
+	result := normalizeClaudeBody([]byte(input), false)
 
 	assert.Equal(t, "global", gjson.GetBytes(result, "usage.inference_geo").String())
 	assert.True(t, gjson.GetBytes(result, "container").Exists())
@@ -54,7 +54,7 @@ func TestNormalizeClaudeBody_NoIterationsNoContextMgmt(t *testing.T) {
 func TestNormalizeClaudeStreamEvent_MessageStart(t *testing.T) {
 	input := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","id":"msg_abc","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_details":null,"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"},"input_transformations":[],"diagnostics":null}}`
 
-	result := normalizeClaudeStreamEvent(input, "message_start")
+	result := normalizeClaudeStreamEvent(input, "message_start", false)
 
 	assert.Equal(t, "global", gjson.Get(result, "message.usage.inference_geo").String())
 	require.False(t, gjson.Get(result, "message.context_management").Exists())
@@ -71,7 +71,7 @@ func TestNormalizeClaudeStreamEvent_MessageStart(t *testing.T) {
 func TestNormalizeClaudeStreamEvent_MessageStartWithContextMgmt(t *testing.T) {
 	input := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","context_management":{"applied_edits":[]},"usage":{"input_tokens":8,"output_tokens":1,"inference_geo":"not_available"}}}`
 
-	result := normalizeClaudeStreamEvent(input, "message_start")
+	result := normalizeClaudeStreamEvent(input, "message_start", false)
 
 	require.False(t, gjson.Get(result, "message.context_management").Exists())
 	assert.Equal(t, "global", gjson.Get(result, "message.usage.inference_geo").String())
@@ -81,7 +81,7 @@ func TestNormalizeClaudeStreamEvent_MessageStartWithContextMgmt(t *testing.T) {
 func TestNormalizeClaudeStreamEvent_MessageDelta(t *testing.T) {
 	input := `{"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":8,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":16,"iterations":[{"input_tokens":8,"output_tokens":16}]},"context_management":{"applied_edits":[]}}`
 
-	result := normalizeClaudeStreamEvent(input, "message_delta")
+	result := normalizeClaudeStreamEvent(input, "message_delta", false)
 
 	require.False(t, gjson.Get(result, "context_management").Exists(), "context_management removed")
 	require.False(t, gjson.Get(result, "usage.iterations").Exists(), "iterations removed")
@@ -97,7 +97,7 @@ func TestNormalizeClaudeStreamEvent_MessageDelta(t *testing.T) {
 func TestNormalizeClaudeStreamEvent_MessageDeltaClean(t *testing.T) {
 	input := `{"type":"message_delta","delta":{"stop_reason":"end_turn","container":null},"usage":{"input_tokens":8,"output_tokens":16}}`
 
-	result := normalizeClaudeStreamEvent(input, "message_delta")
+	result := normalizeClaudeStreamEvent(input, "message_delta", false)
 
 	assert.True(t, gjson.Get(result, "delta.container").Exists())
 	assert.Equal(t, gjson.Null, gjson.Get(result, "delta.container").Type)
@@ -107,14 +107,14 @@ func TestNormalizeClaudeStreamEvent_MessageDeltaClean(t *testing.T) {
 func TestNormalizeClaudeStreamEvent_ContentBlockDelta(t *testing.T) {
 	input := `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`
 
-	result := normalizeClaudeStreamEvent(input, "content_block_delta")
+	result := normalizeClaudeStreamEvent(input, "content_block_delta", false)
 
 	assert.JSONEq(t, input, result, "content_block_delta should not be modified")
 }
 
 func TestNormalizeClaudeStreamEvent_Ping(t *testing.T) {
 	input := `{"type":"ping"}`
-	result := normalizeClaudeStreamEvent(input, "ping")
+	result := normalizeClaudeStreamEvent(input, "ping", false)
 	assert.JSONEq(t, input, result)
 }
 
@@ -233,7 +233,7 @@ func TestGateFunctions_NilChannelMeta(t *testing.T) {
 func TestNormalizeClaudeStreamEvent_ContentBlockDeltaThinking(t *testing.T) {
 	input := `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hello","estimated_tokens":null}}`
 
-	result := normalizeClaudeStreamEvent(input, "content_block_delta")
+	result := normalizeClaudeStreamEvent(input, "content_block_delta", false)
 
 	require.False(t, gjson.Get(result, "delta.estimated_tokens").Exists(), "estimated_tokens removed")
 	assert.Equal(t, "thinking_delta", gjson.Get(result, "delta.type").String())
@@ -244,7 +244,7 @@ func TestNormalizeClaudeStreamEvent_SignatureDeltaStripped(t *testing.T) {
 	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
 	input := `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + maxSig + `"}}`
 
-	result := normalizeClaudeStreamEvent(input, "content_block_delta")
+	result := normalizeClaudeStreamEvent(input, "content_block_delta", false)
 
 	resultSig := gjson.Get(result, "delta.signature").String()
 	assert.True(t, len(resultSig) < len(maxSig), "signature should be shorter after stripping Max fields")
@@ -255,7 +255,7 @@ func TestNormalizeClaudeBody_ThinkingSignatureStripped(t *testing.T) {
 	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
 	input := `{"model":"claude-opus-4-6","content":[{"type":"thinking","thinking":"5","signature":"` + maxSig + `"},{"type":"text","text":"hello"}],"usage":{"input_tokens":8,"output_tokens":16}}`
 
-	result := normalizeClaudeBody([]byte(input))
+	result := normalizeClaudeBody([]byte(input), false)
 
 	resultSig := gjson.GetBytes(result, "content.0.signature").String()
 	assert.True(t, len(resultSig) < len(maxSig), "signature should be shorter after stripping")

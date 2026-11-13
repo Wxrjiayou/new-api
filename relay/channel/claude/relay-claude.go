@@ -123,7 +123,7 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 			}
 		}
 		if shouldNormalizeBody(info) {
-			data = normalizeClaudeStreamEvent(data, claudeResponse.Type)
+			data = normalizeClaudeStreamEvent(data, claudeResponse.Type, shouldBedrockFormat(info))
 		}
 		if shouldBedrockFormat(info) {
 			if claudeResponse.Type == "message_stop" {
@@ -443,7 +443,7 @@ func closeTruncatedClaudeStream(c *gin.Context, info *relaycommon.RelayInfo, cla
 	if !claudeInfo.Done {
 		delta := fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":%d}}`, claudeInfo.Usage.CompletionTokens)
 		if shouldNormalizeBody(info) {
-			delta = normalizeClaudeStreamEvent(delta, "message_delta")
+			delta = normalizeClaudeStreamEvent(delta, "message_delta", shouldBedrockFormat(info))
 		}
 		if shouldBedrockFormat(info) {
 			delta = bedrockOverlayStreamEvent(delta, "message_delta")
@@ -519,7 +519,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		}
 	case types.RelayFormatClaude:
 		if shouldNormalizeBody(info) {
-			responseData = normalizeClaudeBody(data)
+			responseData = normalizeClaudeBody(data, shouldBedrockFormat(info))
 		} else {
 			responseData = data
 		}

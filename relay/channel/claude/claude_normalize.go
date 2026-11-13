@@ -324,9 +324,11 @@ func encodeVarint(v uint64) []byte {
 
 // normalizeClaudeBody normalizes a non-streaming Claude response body to match
 // official API format: removes Max-specific fields, adds official-only fields.
-func normalizeClaudeBody(data []byte) []byte {
+func normalizeClaudeBody(data []byte, keepCacheCreation bool) []byte {
 	data = deleteBytes(data, "usage.iterations")
-	data = deleteBytes(data, "usage.cache_creation")
+	if !keepCacheCreation {
+		data = deleteBytes(data, "usage.cache_creation")
+	}
 	data = deleteBytes(data, "context_management")
 	data = deleteBytes(data, "input_transformations")
 	data = deleteBytes(data, "diagnostics")
@@ -354,11 +356,13 @@ func normalizeClaudeBody(data []byte) []byte {
 }
 
 // normalizeClaudeStreamEvent normalizes a single SSE event string for streaming.
-func normalizeClaudeStreamEvent(data string, eventType string) string {
+func normalizeClaudeStreamEvent(data string, eventType string, keepCacheCreation bool) string {
 	switch eventType {
 	case "message_start":
 		data = deleteStr(data, "message.context_management")
-		data = deleteStr(data, "message.usage.cache_creation")
+		if !keepCacheCreation {
+			data = deleteStr(data, "message.usage.cache_creation")
+		}
 		data = deleteStr(data, "message.input_transformations")
 		data = deleteStr(data, "message.diagnostics")
 		data = deleteStr(data, "message.stop_details")
@@ -371,7 +375,9 @@ func normalizeClaudeStreamEvent(data string, eventType string) string {
 	case "message_delta":
 		data = deleteStr(data, "context_management")
 		data = deleteStr(data, "usage.iterations")
-		data = deleteStr(data, "usage.cache_creation")
+		if !keepCacheCreation {
+			data = deleteStr(data, "usage.cache_creation")
+		}
 		data = deleteStr(data, "delta.stop_details")
 		if !gjson.Get(data, "delta.container").Exists() {
 			data = setStr(data, "delta.container", nil)
@@ -571,9 +577,7 @@ func bedrockOverlayStreamEvent(data string, eventType string) string {
 			data = setStr(data, "message.stop_details", nil)
 		}
 		data = deleteStr(data, "message.container")
-		if gjson.Get(data, "message.usage.inference_geo").Exists() {
-			data = setStr(data, "message.usage.inference_geo", "not_available")
-		}
+		data = deleteStr(data, "message.usage.inference_geo")
 		if !gjson.Get(data, "message.usage.service_tier").Exists() {
 			data = setStr(data, "message.usage.service_tier", "standard")
 		}
