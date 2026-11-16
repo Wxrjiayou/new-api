@@ -44,3 +44,9 @@ relaykit/relayconvert/chat_responses_live_local_test.go
 service/openaicompat/chat_responses_live_local_test.go
 go.work
 go.work.sum
+
+# Channel probe scripts embed live API keys; collected responses are bulk data.
+tests/channel_probe.py
+tests/awsb_error_scenarios.py
+tests/awsb_normalize_check.py
+tests/awsb_cases/results/
