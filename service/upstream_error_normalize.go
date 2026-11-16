@@ -392,6 +392,11 @@ func wrapBedrockErrorFormat(apiErr *types.NewAPIError) *types.NewAPIError {
 	if apiErr == nil {
 		return nil
 	}
+	// Skip errors already wrapped elsewhere in the relay pipeline (or by a
+	// Bedrock-format upstream) so the SDK prefix is never nested twice.
+	if strings.Contains(apiErr.Error(), "operation error Bedrock Runtime") {
+		return apiErr
+	}
 	requestID := uuid.New().String()
 	exType := bedrockExceptionType(apiErr.StatusCode)
 	msg := apiErr.Error()

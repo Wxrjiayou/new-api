@@ -43,6 +43,9 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 	}
 	if shouldBedrockFormat(info) {
+		if apiErr := rejectUnsupportedImageMediaTypes(request); apiErr != nil {
+			return nil, WrapBedrockRequestError(apiErr)
+		}
 		restoreBedrockIDs(request)
 	}
 	if request.MaxTokens != nil && *request.MaxTokens == 0 {

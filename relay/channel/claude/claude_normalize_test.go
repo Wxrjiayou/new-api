@@ -1,11 +1,13 @@
 package claude
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -240,53 +242,82 @@ func TestNormalizeClaudeStreamEvent_ContentBlockDeltaThinking(t *testing.T) {
 	assert.Equal(t, "hello", gjson.Get(result, "delta.thinking").String())
 }
 
-func TestNormalizeClaudeStreamEvent_SignatureDeltaStripped(t *testing.T) {
+func TestNormalizeClaudeStreamEvent_SignatureDeltaPreserved(t *testing.T) {
+	// Signatures pass through unchanged: stripping broke multi-turn replay
+	// against MAX ("Invalid signature in thinking block").
 	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
 	input := `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"` + maxSig + `"}}`
 
 	result := normalizeClaudeStreamEvent(input, "content_block_delta", false)
 
-	resultSig := gjson.Get(result, "delta.signature").String()
-	assert.True(t, len(resultSig) < len(maxSig), "signature should be shorter after stripping Max fields")
-	assert.NotEqual(t, maxSig, resultSig)
+	assert.Equal(t, maxSig, gjson.Get(result, "delta.signature").String())
 }
 
-func TestNormalizeClaudeBody_ThinkingSignatureStripped(t *testing.T) {
+func TestNormalizeClaudeBody_ThinkingSignaturePreserved(t *testing.T) {
 	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
 	input := `{"model":"claude-opus-4-6","content":[{"type":"thinking","thinking":"5","signature":"` + maxSig + `"},{"type":"text","text":"hello"}],"usage":{"input_tokens":8,"output_tokens":16}}`
 
 	result := normalizeClaudeBody([]byte(input), false)
 
-	resultSig := gjson.GetBytes(result, "content.0.signature").String()
-	assert.True(t, len(resultSig) < len(maxSig), "signature should be shorter after stripping")
+	assert.Equal(t, maxSig, gjson.GetBytes(result, "content.0.signature").String())
 	assert.Equal(t, "text", gjson.GetBytes(result, "content.1.type").String(), "text block preserved")
 }
 
-func TestStripMaxSignatureFields(t *testing.T) {
-	maxSig := "EowCCqgBCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ1MDgyMDQ1ZS1kM2ExLTQwYjctOWVkNi05ZDc3ZTQ1MzZlNGZyECoIT/gREtyJulZW+Otv/w+IAQGoAdjn5tUGsAECEgxPNYRGn4nCPdt85VkaDCO0ySHwRXcgRNUrryIwSaUw8dVd+sZg2Cm/QY3NX0rNklBnJ2DytxNqmWh9gKVmOnqIuxIh7hFoiJtmUTr5KhGNz2GMRRrGah8EIe8GxWchexgB"
-	cleanSig := "EvQBCpABCBIYAipAc3duPkzTaEMW0m7JPMbEOEl6zlsI41lphmevbb3tiLZ1C6CywRun1StpGA8ZJIhKFY0Lg9h8qcZdLa6dczh+QzIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiQ0MmRlNzljNy01ZmJiLTRlYTYtYmRjNC00MTM4MTYyYjQ1ZmKoAdrn5tUGEgyaDNNIiL5PnAcPDNYaDOUWFUe/AmGno5GCsyIw7RyX5yOqm9/CZov4c18VVYznpjgiLtXGbRXi4E509I4na1lsSmi+Weq2vVVMfwMBKhGkgdfq3DY9FwSQWWGKpa/YXBgB"
+func TestNormalizeClaudeBody_SafeguardResultsRemoved(t *testing.T) {
+	input := `{"content":[],"safeguard_results":[],"usage":{"input_tokens":8,"output_tokens":16}}`
+	result := normalizeClaudeBody([]byte(input), false)
+	assert.False(t, gjson.GetBytes(result, "safeguard_results").Exists())
 
-	t.Run("strips Max fields from real signature", func(t *testing.T) {
-		result := stripMaxSignatureFields(maxSig)
-		assert.NotEqual(t, maxSig, result, "should be modified")
-		assert.True(t, len(result) < len(maxSig), "should be shorter (was %d, got %d)", len(maxSig), len(result))
-	})
+	start := `{"type":"message_start","message":{"safeguard_results":[],"usage":{"input_tokens":8}}}`
+	assert.False(t, gjson.Get(normalizeClaudeStreamEvent(start, "message_start", false), "message.safeguard_results").Exists())
 
-	t.Run("clean signature unchanged", func(t *testing.T) {
-		result := stripMaxSignatureFields(cleanSig)
-		assert.Equal(t, cleanSig, result, "already-clean signature should not change")
-	})
+	delta := `{"type":"message_delta","delta":{"stop_reason":"end_turn","safeguard_results":[]},"usage":{"output_tokens":16}}`
+	assert.False(t, gjson.Get(normalizeClaudeStreamEvent(delta, "message_delta", false), "delta.safeguard_results").Exists())
+}
 
-	t.Run("empty string", func(t *testing.T) {
-		assert.Equal(t, "", stripMaxSignatureFields(""))
-	})
+func TestBedrockOverlaySpeed(t *testing.T) {
+	// MAX returns speed:"standard"; Bedrock non-stream reports null and
+	// streaming usage has no speed key at all.
+	body := `{"id":"msg_bdrk_01x","usage":{"input_tokens":8,"output_tokens":16,"speed":"standard"}}`
+	result := bedrockOverlayBody([]byte(body))
+	assert.True(t, gjson.GetBytes(result, "usage.speed").Exists())
+	assert.Equal(t, gjson.Null, gjson.GetBytes(result, "usage.speed").Type)
 
-	t.Run("invalid base64", func(t *testing.T) {
-		assert.Equal(t, "not-base64!!!", stripMaxSignatureFields("not-base64!!!"))
-	})
+	start := `{"type":"message_start","message":{"id":"msg_bdrk_01x","usage":{"input_tokens":8,"speed":"standard"}}}`
+	assert.False(t, gjson.Get(bedrockOverlayStreamEvent(start, "message_start"), "message.usage.speed").Exists())
 
-	t.Run("valid base64 non-protobuf", func(t *testing.T) {
-		sig := "AQIDBA=="
-		assert.Equal(t, sig, stripMaxSignatureFields(sig))
-	})
+	delta := `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":16,"speed":"standard"}}`
+	assert.False(t, gjson.Get(bedrockOverlayStreamEvent(delta, "message_delta"), "usage.speed").Exists())
+}
+
+func TestWrapBedrockRequestErrorNoDoubleWrap(t *testing.T) {
+	original := types.WithClaudeError(types.ClaudeError{Type: "invalid_request_error", Message: "temperature: range: 0..1"}, http.StatusBadRequest)
+	wrapped := WrapBedrockRequestError(original)
+	require.Contains(t, wrapped.Error(), "operation error Bedrock Runtime")
+	require.Equal(t, 1, strings.Count(wrapped.Error(), "operation error Bedrock Runtime"))
+
+	reWrapped := WrapBedrockRequestError(wrapped)
+	assert.Equal(t, wrapped.Error(), reWrapped.Error(), "already-wrapped error must not be wrapped again")
+}
+
+func TestBedrockRequestValidation(t *testing.T) {
+	imageRequest := func(mediaType string) *dto.ClaudeRequest {
+		return &dto.ClaudeRequest{Messages: []dto.ClaudeMessage{{Role: "user", Content: []any{
+			map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": mediaType, "data": "AQID"}},
+		}}}}
+	}
+	for _, mt := range []string{"image/jpeg", "image/png", "image/gif", "image/webp"} {
+		assert.Nil(t, rejectUnsupportedImageMediaTypes(imageRequest(mt)), mt)
+	}
+	apiErr := rejectUnsupportedImageMediaTypes(imageRequest("image/bmp"))
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	assert.Equal(t, "Image media_type must be JPEG, PNG, GIF, or WebP", apiErr.Error())
+
+	toolRequest := func(toolType string) *dto.ClaudeRequest {
+		return &dto.ClaudeRequest{Tools: []any{map[string]any{"type": toolType, "name": "t"}}}
+	}
+	assert.NotNil(t, rejectUnsupportedServerTools(toolRequest("web_search_20250305")))
+	assert.NotNil(t, rejectUnsupportedServerTools(toolRequest("code_execution_20250825")))
+	assert.Nil(t, rejectUnsupportedServerTools(toolRequest("web_fetch_20250910")), "real Bedrock accepts web_fetch declarations")
 }

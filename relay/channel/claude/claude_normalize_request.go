@@ -8,10 +8,11 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
+// web_fetch is intentionally absent: real Bedrock accepts the tool declaration
+// (without executing it), so rejecting it would diverge from the reference.
 var unsupportedServerTools = map[string]bool{
-	"web_search_20250305":    true,
-	"web_search_20260318":    true,
-	"web_fetch_20250910":     true,
+	"web_search_20250305":     true,
+	"web_search_20260318":     true,
 	"code_execution_20250825": true,
 }
 
@@ -47,6 +48,42 @@ func extractToolType(tool any) string {
 		}
 	}
 	return ""
+}
+
+var bedrockImageMediaTypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+// rejectUnsupportedImageMediaTypes mimics Bedrock's image validation: MAX
+// accepts media types (e.g. image/bmp) that Bedrock rejects with this message.
+func rejectUnsupportedImageMediaTypes(request *dto.ClaudeRequest) *types.NewAPIError {
+	for i := range request.Messages {
+		blocks, ok := request.Messages[i].Content.([]any)
+		if !ok {
+			continue
+		}
+		for _, block := range blocks {
+			m, ok := block.(map[string]any)
+			if !ok || m["type"] != "image" {
+				continue
+			}
+			source, ok := m["source"].(map[string]any)
+			if !ok {
+				continue
+			}
+			mediaType, _ := source["media_type"].(string)
+			if !bedrockImageMediaTypes[mediaType] {
+				return types.WithClaudeError(types.ClaudeError{
+					Type:    "invalid_request_error",
+					Message: "Image media_type must be JPEG, PNG, GIF, or WebP",
+				}, http.StatusBadRequest)
+			}
+		}
+	}
+	return nil
 }
 
 func restoreBedrockIDs(request *dto.ClaudeRequest) {

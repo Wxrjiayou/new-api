@@ -3,8 +3,6 @@ package claude
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -122,205 +120,6 @@ func setBytes(data []byte, path string, value interface{}) []byte {
 	return result
 }
 
-var stripSignatureFieldTags = map[uint64]bool{14: true, 17: true, 22: true}
-
-func stripMaxSignatureFields(sig string) string {
-	if sig == "" {
-		return sig
-	}
-	raw, err := base64.StdEncoding.DecodeString(sig)
-	if err != nil {
-		return sig
-	}
-	out, changed := stripProtoFieldsFromSignature(raw)
-	if !changed {
-		return sig
-	}
-	return base64.StdEncoding.EncodeToString(out)
-}
-
-func stripProtoFieldsFromSignature(data []byte) ([]byte, bool) {
-	changed := false
-	var result []byte
-	pos := 0
-	for pos < len(data) {
-		fieldStart := pos
-		tag, n := binary.Uvarint(data[pos:])
-		if n <= 0 {
-			return data, false
-		}
-		pos += n
-		fieldNum := tag >> 3
-		wireType := tag & 0x7
-
-		switch wireType {
-		case 0: // varint
-			for pos < len(data) && data[pos]&0x80 != 0 {
-				pos++
-			}
-			if pos >= len(data) {
-				return data, false
-			}
-			pos++
-		case 2: // length-delimited
-			length, n := binary.Uvarint(data[pos:])
-			if n <= 0 {
-				return data, false
-			}
-			pos += n
-			if uint64(pos)+length > uint64(len(data)) {
-				return data, false
-			}
-			if fieldNum == 2 {
-				innerBody := data[pos : pos+int(length)]
-				newInner, innerChanged := rebuildInnerField2(innerBody)
-				if innerChanged {
-					changed = true
-					result = append(result, encodeTag(2, 2)...)
-					result = append(result, encodeVarint(uint64(len(newInner)))...)
-					result = append(result, newInner...)
-					pos += int(length)
-					continue
-				}
-			}
-			pos += int(length)
-		case 1: // 64-bit
-			pos += 8
-		case 5: // 32-bit
-			pos += 4
-		default:
-			return data, false
-		}
-		if pos > len(data) {
-			return data, false
-		}
-		result = append(result, data[fieldStart:pos]...)
-	}
-	return result, changed
-}
-
-func rebuildInnerField2(data []byte) ([]byte, bool) {
-	changed := false
-	var result []byte
-	pos := 0
-	for pos < len(data) {
-		fieldStart := pos
-		tag, n := binary.Uvarint(data[pos:])
-		if n <= 0 {
-			return data, false
-		}
-		pos += n
-		fieldNum := tag >> 3
-		wireType := tag & 0x7
-
-		switch wireType {
-		case 0: // varint
-			for pos < len(data) && data[pos]&0x80 != 0 {
-				pos++
-			}
-			if pos >= len(data) {
-				return data, false
-			}
-			pos++
-		case 2: // length-delimited
-			length, n := binary.Uvarint(data[pos:])
-			if n <= 0 {
-				return data, false
-			}
-			pos += n
-			if uint64(pos)+length > uint64(len(data)) {
-				return data, false
-			}
-			if fieldNum == 1 {
-				innerMsg := data[pos : pos+int(length)]
-				newMsg, msgChanged := stripFieldsFromMessage(innerMsg, stripSignatureFieldTags)
-				if msgChanged {
-					changed = true
-					result = append(result, encodeTag(1, 2)...)
-					result = append(result, encodeVarint(uint64(len(newMsg)))...)
-					result = append(result, newMsg...)
-					pos += int(length)
-					continue
-				}
-			}
-			pos += int(length)
-		case 1:
-			pos += 8
-		case 5:
-			pos += 4
-		default:
-			return data, false
-		}
-		if pos > len(data) {
-			return data, false
-		}
-		result = append(result, data[fieldStart:pos]...)
-	}
-	return result, changed
-}
-
-func stripFieldsFromMessage(data []byte, stripTags map[uint64]bool) ([]byte, bool) {
-	changed := false
-	var result []byte
-	pos := 0
-	for pos < len(data) {
-		fieldStart := pos
-		tag, n := binary.Uvarint(data[pos:])
-		if n <= 0 {
-			return data, false
-		}
-		pos += n
-		wireType := tag & 0x7
-		fieldNum := tag >> 3
-
-		switch wireType {
-		case 0:
-			for pos < len(data) && data[pos]&0x80 != 0 {
-				pos++
-			}
-			if pos >= len(data) {
-				return data, false
-			}
-			pos++
-		case 2:
-			length, n := binary.Uvarint(data[pos:])
-			if n <= 0 {
-				return data, false
-			}
-			pos += n
-			if uint64(pos)+length > uint64(len(data)) {
-				return data, false
-			}
-			pos += int(length)
-		case 1:
-			pos += 8
-		case 5:
-			pos += 4
-		default:
-			return data, false
-		}
-		if pos > len(data) {
-			return data, false
-		}
-		if stripTags[fieldNum] {
-			changed = true
-			continue
-		}
-		result = append(result, data[fieldStart:pos]...)
-	}
-	return result, changed
-}
-
-func encodeTag(fieldNum uint64, wireType uint64) []byte {
-	return encodeVarint(fieldNum<<3 | wireType)
-}
-
-func encodeVarint(v uint64) []byte {
-	buf := make([]byte, binary.MaxVarintLen64)
-	n := binary.PutUvarint(buf, v)
-	return buf[:n]
-}
-
 // normalizeClaudeBody normalizes a non-streaming Claude response body to match
 // official API format: removes Max-specific fields, adds official-only fields.
 func normalizeClaudeBody(data []byte, keepCacheCreation bool) []byte {
@@ -331,6 +130,7 @@ func normalizeClaudeBody(data []byte, keepCacheCreation bool) []byte {
 	data = deleteBytes(data, "context_management")
 	data = deleteBytes(data, "input_transformations")
 	data = deleteBytes(data, "diagnostics")
+	data = deleteBytes(data, "safeguard_results")
 	data = deleteBytes(data, "stop_details")
 	if gjson.GetBytes(data, "usage.inference_geo").Exists() {
 		data = setBytes(data, "usage.inference_geo", "global")
@@ -340,12 +140,6 @@ func normalizeClaudeBody(data []byte, keepCacheCreation bool) []byte {
 	}
 	gjson.GetBytes(data, "content").ForEach(func(key, value gjson.Result) bool {
 		idx := key.String()
-		if value.Get("type").String() == "thinking" && value.Get("signature").String() != "" {
-			sig := value.Get("signature").String()
-			if cleaned := stripMaxSignatureFields(sig); cleaned != sig {
-				data = setBytes(data, "content."+idx+".signature", cleaned)
-			}
-		}
 		if value.Get("type").String() == "tool_use" {
 			data = deleteBytes(data, "content."+idx+".caller")
 		}
@@ -364,6 +158,7 @@ func normalizeClaudeStreamEvent(data string, eventType string, keepCacheCreation
 		}
 		data = deleteStr(data, "message.input_transformations")
 		data = deleteStr(data, "message.diagnostics")
+		data = deleteStr(data, "message.safeguard_results")
 		data = deleteStr(data, "message.stop_details")
 		if gjson.Get(data, "message.usage.inference_geo").Exists() {
 			data = setStr(data, "message.usage.inference_geo", "global")
@@ -378,17 +173,12 @@ func normalizeClaudeStreamEvent(data string, eventType string, keepCacheCreation
 			data = deleteStr(data, "usage.cache_creation")
 		}
 		data = deleteStr(data, "delta.stop_details")
+		data = deleteStr(data, "delta.safeguard_results")
 		if !gjson.Get(data, "delta.container").Exists() {
 			data = setStr(data, "delta.container", nil)
 		}
 	case "content_block_delta":
 		data = deleteStr(data, "delta.estimated_tokens")
-		if gjson.Get(data, "delta.type").String() == "signature_delta" {
-			sig := gjson.Get(data, "delta.signature").String()
-			if cleaned := stripMaxSignatureFields(sig); cleaned != sig {
-				data = setStr(data, "delta.signature", cleaned)
-			}
-		}
 	}
 	return data
 }
@@ -533,9 +323,8 @@ func bedrockOverlayBody(data []byte) []byte {
 	if !gjson.GetBytes(data, "usage.service_tier").Exists() {
 		data = setBytes(data, "usage.service_tier", "standard")
 	}
-	if gjson.GetBytes(data, "usage.speed").Type == gjson.Null || !gjson.GetBytes(data, "usage.speed").Exists() {
-		data = setBytes(data, "usage.speed", nil)
-	}
+	// MAX returns a real speed value ("standard"); Bedrock always reports null.
+	data = setBytes(data, "usage.speed", nil)
 	if !gjson.GetBytes(data, "usage.iterations").Exists() {
 		data = setBytes(data, "usage.iterations", nil)
 	}
@@ -577,6 +366,8 @@ func bedrockOverlayStreamEvent(data string, eventType string) string {
 		}
 		data = deleteStr(data, "message.container")
 		data = deleteStr(data, "message.usage.inference_geo")
+		// Bedrock streaming usage carries no speed key at all.
+		data = deleteStr(data, "message.usage.speed")
 		if !gjson.Get(data, "message.usage.service_tier").Exists() {
 			data = setStr(data, "message.usage.service_tier", "standard")
 		}
@@ -598,6 +389,7 @@ func bedrockOverlayStreamEvent(data string, eventType string) string {
 		}
 		data = deleteStr(data, "delta.container")
 		if gjson.Get(data, "usage").Exists() {
+			data = deleteStr(data, "usage.speed")
 			if !gjson.Get(data, "usage.service_tier").Exists() {
 				data = setStr(data, "usage.service_tier", "standard")
 			}
@@ -629,6 +421,11 @@ func bedrockMessageStop(inputTokens, outputTokens, cacheRead, cacheWrite int, fi
 func WrapBedrockRequestError(apiErr *types.NewAPIError) *types.NewAPIError {
 	if apiErr == nil {
 		return nil
+	}
+	// The error may already be Bedrock-wrapped by another stage of the relay
+	// pipeline; wrapping twice nests the SDK prefix and fingerprints the relay.
+	if strings.Contains(apiErr.Error(), "operation error Bedrock Runtime") {
+		return apiErr
 	}
 	var exType string
 	switch {

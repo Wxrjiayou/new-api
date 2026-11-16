@@ -486,3 +486,12 @@ func TestProcessChannelErrorRecordsOriginalUpstreamErrorForAdmins(t *testing.T) 
 	original, _ := common.GetContextKeyType[*types.NewAPIError](c, upstreamOriginalErrorKey)
 	assert.Nil(t, original, "the next attempt does not report this attempt's upstream error")
 }
+
+func TestWrapBedrockErrorFormatNoDoubleWrap(t *testing.T) {
+	original := makeAPIError("temperature: range: 0..1", http.StatusBadRequest)
+	wrapped := wrapBedrockErrorFormat(original)
+	require.Contains(t, wrapped.Error(), "operation error Bedrock Runtime")
+
+	reWrapped := wrapBedrockErrorFormat(wrapped)
+	assert.Equal(t, wrapped.Error(), reWrapped.Error(), "already-wrapped error must not be wrapped again")
+}
