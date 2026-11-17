@@ -382,8 +382,16 @@ func TestNormalizeContextManagementEchoForBedrock(t *testing.T) {
 	official := normalizeClaudeBody([]byte(body), false)
 	assert.False(t, gjson.GetBytes(official, "context_management").Exists(), "still stripped in official format")
 
-	start := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","context_management":{"applied_edits":[]},"usage":{"input_tokens":8,"output_tokens":1}}}`
+	start := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","context_management":{"applied_edits":[{"type":"clear_thinking"}]},"usage":{"input_tokens":8,"output_tokens":1}}}`
 	assert.True(t, gjson.Get(normalizeClaudeStreamEvent(start, "message_start", true), "message.context_management").Exists())
-	delta := `{"type":"message_delta","context_management":{"applied_edits":[]},"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":16}}`
+	delta := `{"type":"message_delta","context_management":{"applied_edits":[{"type":"clear_tool_uses"}]},"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":16}}`
 	assert.True(t, gjson.Get(normalizeClaudeStreamEvent(delta, "message_delta", true), "context_management").Exists())
+
+	// Empty envelopes (MAX emits them on every request, Bedrock references
+	// do not) are stripped; only applied edits pass through.
+	emptyBody := `{"content":[],"context_management":{"applied_edits":[]},"usage":{"input_tokens":8,"output_tokens":16}}`
+	assert.False(t, gjson.GetBytes(normalizeClaudeBody([]byte(emptyBody), true), "context_management").Exists())
+	emptyStart := `{"type":"message_start","message":{"context_management":{"applied_edits":[]},"usage":{"input_tokens":8}}}`
+	assert.False(t, gjson.Get(normalizeClaudeStreamEvent(emptyStart, "message_start", true), "message.context_management").Exists())
+	assert.True(t, gjson.Get(normalizeClaudeStreamEvent(`{"type":"message_start","message":{"context_management":{"applied_edits":[{"type":"clear_tool_uses"}]},"usage":{}}}`, "message_start", true), "message.context_management").Exists())
 }

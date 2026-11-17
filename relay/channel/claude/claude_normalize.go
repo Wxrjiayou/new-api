@@ -130,6 +130,11 @@ func normalizeClaudeBody(data []byte, bedrockFormat bool) []byte {
 	if !bedrockFormat {
 		data = deleteBytes(data, "usage.cache_creation")
 		data = deleteBytes(data, "context_management")
+	} else if cm := gjson.GetBytes(data, "context_management"); cm.Exists() && len(cm.Get("applied_edits").Array()) == 0 {
+		// Real Bedrock echoes context_management only when edits were
+		// actually applied; MAX returns an empty envelope on every request
+		// (1118 post-fix captures: XDM/LYQ omit it on non-beta cases).
+		data = deleteBytes(data, "context_management")
 	}
 	data = deleteBytes(data, "input_transformations")
 	data = deleteBytes(data, "diagnostics")
@@ -164,6 +169,8 @@ func normalizeClaudeStreamEvent(data string, eventType string, bedrockFormat boo
 		if !bedrockFormat {
 			data = deleteStr(data, "message.context_management")
 			data = deleteStr(data, "message.usage.cache_creation")
+		} else if cm := gjson.Get(data, "message.context_management"); cm.Exists() && len(cm.Get("applied_edits").Array()) == 0 {
+			data = deleteStr(data, "message.context_management")
 		}
 		data = deleteStr(data, "message.input_transformations")
 		data = deleteStr(data, "message.diagnostics")
@@ -183,6 +190,8 @@ func normalizeClaudeStreamEvent(data string, eventType string, bedrockFormat boo
 		if !bedrockFormat {
 			data = deleteStr(data, "context_management")
 			data = deleteStr(data, "usage.cache_creation")
+		} else if cm := gjson.Get(data, "context_management"); cm.Exists() && len(cm.Get("applied_edits").Array()) == 0 {
+			data = deleteStr(data, "context_management")
 		}
 		data = deleteStr(data, "usage.iterations")
 		data = deleteStr(data, "delta.stop_details")
