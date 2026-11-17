@@ -115,6 +115,12 @@ func HandleStreamResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		info.StreamStatus.MarkCompleted()
 	}
 	if info.RelayFormat == types.RelayFormatClaude {
+		if shouldBedrockFormat(info) && claudeResponse.Type == "ping" {
+			// Real Bedrock SSE never emits ping events; forwarding the
+			// upstream's keepalive pings is a first-party fingerprint
+			// (1117/1118 dual-reference captures show ping=0).
+			return nil
+		}
 		FormatClaudeResponseInfo(&claudeResponse, nil, claudeInfo)
 
 		if claudeResponse.Type == "message_start" {

@@ -122,18 +122,25 @@ func setBytes(data []byte, path string, value interface{}) []byte {
 
 // normalizeClaudeBody normalizes a non-streaming Claude response body to match
 // official API format: removes Max-specific fields, adds official-only fields.
-func normalizeClaudeBody(data []byte, keepCacheCreation bool) []byte {
+// bedrockFormat selects the AWSB target shape: fields real Bedrock returns
+// (nested cache_creation, context_management when the beta is applied) are
+// preserved instead of stripped.
+func normalizeClaudeBody(data []byte, bedrockFormat bool) []byte {
 	data = deleteBytes(data, "usage.iterations")
-	if !keepCacheCreation {
+	if !bedrockFormat {
 		data = deleteBytes(data, "usage.cache_creation")
+		data = deleteBytes(data, "context_management")
 	}
-	data = deleteBytes(data, "context_management")
 	data = deleteBytes(data, "input_transformations")
 	data = deleteBytes(data, "diagnostics")
 	data = deleteBytes(data, "safeguard_results")
 	data = deleteBytes(data, "stop_details")
 	if gjson.GetBytes(data, "usage.inference_geo").Exists() {
-		data = setBytes(data, "usage.inference_geo", "global")
+		if bedrockFormat {
+			data = deleteBytes(data, "usage.inference_geo")
+		} else {
+			data = setBytes(data, "usage.inference_geo", "global")
+		}
 	}
 	if !gjson.GetBytes(data, "container").Exists() {
 		data = setBytes(data, "container", nil)
@@ -149,11 +156,13 @@ func normalizeClaudeBody(data []byte, keepCacheCreation bool) []byte {
 }
 
 // normalizeClaudeStreamEvent normalizes a single SSE event string for streaming.
-func normalizeClaudeStreamEvent(data string, eventType string, keepCacheCreation bool) string {
+// bedrockFormat preserves fields real Bedrock streams (cache_creation nesting,
+// context_management echo) instead of stripping them.
+func normalizeClaudeStreamEvent(data string, eventType string, bedrockFormat bool) string {
 	switch eventType {
 	case "message_start":
-		data = deleteStr(data, "message.context_management")
-		if !keepCacheCreation {
+		if !bedrockFormat {
+			data = deleteStr(data, "message.context_management")
 			data = deleteStr(data, "message.usage.cache_creation")
 		}
 		data = deleteStr(data, "message.input_transformations")
@@ -161,17 +170,21 @@ func normalizeClaudeStreamEvent(data string, eventType string, keepCacheCreation
 		data = deleteStr(data, "message.safeguard_results")
 		data = deleteStr(data, "message.stop_details")
 		if gjson.Get(data, "message.usage.inference_geo").Exists() {
-			data = setStr(data, "message.usage.inference_geo", "global")
+			if bedrockFormat {
+				data = deleteStr(data, "message.usage.inference_geo")
+			} else {
+				data = setStr(data, "message.usage.inference_geo", "global")
+			}
 		}
-		if !gjson.Get(data, "message.container").Exists() {
+		if !bedrockFormat && !gjson.Get(data, "message.container").Exists() {
 			data = setStr(data, "message.container", nil)
 		}
 	case "message_delta":
-		data = deleteStr(data, "context_management")
-		data = deleteStr(data, "usage.iterations")
-		if !keepCacheCreation {
+		if !bedrockFormat {
+			data = deleteStr(data, "context_management")
 			data = deleteStr(data, "usage.cache_creation")
 		}
+		data = deleteStr(data, "usage.iterations")
 		data = deleteStr(data, "delta.stop_details")
 		data = deleteStr(data, "delta.safeguard_results")
 		if !gjson.Get(data, "delta.container").Exists() {
@@ -317,16 +330,14 @@ func bedrockOverlayBody(data []byte) []byte {
 		data = setBytes(data, "stop_details", nil)
 	}
 	data = deleteBytes(data, "container")
-	if gjson.GetBytes(data, "usage.inference_geo").Exists() {
-		data = setBytes(data, "usage.inference_geo", "not_available")
-	}
+	// Real Bedrock usage carries none of these keys (1117/1118 dual-reference
+	// captures): null placeholders are themselves a first-party fingerprint.
+	data = deleteBytes(data, "usage.inference_geo")
+	data = deleteBytes(data, "usage.speed")
+	data = deleteBytes(data, "usage.iterations")
+	data = deleteBytes(data, "usage.server_tool_use")
 	if !gjson.GetBytes(data, "usage.service_tier").Exists() {
 		data = setBytes(data, "usage.service_tier", "standard")
-	}
-	// MAX returns a real speed value ("standard"); Bedrock always reports null.
-	data = setBytes(data, "usage.speed", nil)
-	if !gjson.GetBytes(data, "usage.iterations").Exists() {
-		data = setBytes(data, "usage.iterations", nil)
 	}
 	if !gjson.GetBytes(data, "usage.cache_creation").Exists() {
 		data = setBytes(data, "usage.cache_creation", map[string]int{
@@ -334,11 +345,9 @@ func bedrockOverlayBody(data []byte) []byte {
 			"ephemeral_1h_input_tokens": 0,
 		})
 	}
-	if !gjson.GetBytes(data, "usage.output_tokens_details").Exists() {
-		data = setBytes(data, "usage.output_tokens_details", nil)
-	}
-	if !gjson.GetBytes(data, "usage.server_tool_use").Exists() {
-		data = setBytes(data, "usage.server_tool_use", nil)
+	// output_tokens_details appears only when thinking actually occurred.
+	if otd := gjson.GetBytes(data, "usage.output_tokens_details"); !otd.Exists() || otd.Type == gjson.Null {
+		data = deleteBytes(data, "usage.output_tokens_details")
 	}
 	gjson.GetBytes(data, "content").ForEach(func(key, value gjson.Result) bool {
 		idx := key.String()
@@ -365,9 +374,14 @@ func bedrockOverlayStreamEvent(data string, eventType string) string {
 			data = setStr(data, "message.stop_details", nil)
 		}
 		data = deleteStr(data, "message.container")
+		// Bedrock streaming usage carries none of these keys at all.
 		data = deleteStr(data, "message.usage.inference_geo")
-		// Bedrock streaming usage carries no speed key at all.
 		data = deleteStr(data, "message.usage.speed")
+		data = deleteStr(data, "message.usage.iterations")
+		data = deleteStr(data, "message.usage.server_tool_use")
+		if otd := gjson.Get(data, "message.usage.output_tokens_details"); otd.Exists() && otd.Type == gjson.Null {
+			data = deleteStr(data, "message.usage.output_tokens_details")
+		}
 		if !gjson.Get(data, "message.usage.service_tier").Exists() {
 			data = setStr(data, "message.usage.service_tier", "standard")
 		}
@@ -390,6 +404,11 @@ func bedrockOverlayStreamEvent(data string, eventType string) string {
 		data = deleteStr(data, "delta.container")
 		if gjson.Get(data, "usage").Exists() {
 			data = deleteStr(data, "usage.speed")
+			data = deleteStr(data, "usage.iterations")
+			data = deleteStr(data, "usage.server_tool_use")
+			if otd := gjson.Get(data, "usage.output_tokens_details"); otd.Exists() && otd.Type == gjson.Null {
+				data = deleteStr(data, "usage.output_tokens_details")
+			}
 			if !gjson.Get(data, "usage.service_tier").Exists() {
 				data = setStr(data, "usage.service_tier", "standard")
 			}

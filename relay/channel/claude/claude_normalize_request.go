@@ -8,12 +8,33 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
-// web_fetch is intentionally absent: real Bedrock accepts the tool declaration
-// (without executing it), so rejecting it would diverge from the reference.
+// web_fetch stays rejected: AWS docs list neither web tool on Bedrock and
+// LYQ (verified real Bedrock via signature platform bits) returns 400 for
+// both. XDM accepting them was a conversion-layer artifact, not Bedrock
+// behavior (1118 cross-check).
 var unsupportedServerTools = map[string]bool{
 	"web_search_20250305":     true,
 	"web_search_20260318":     true,
+	"web_fetch_20250910":      true,
+	"web_fetch_20260209":      true,
 	"code_execution_20250825": true,
+}
+
+// rejectInvalidThinkingBudget mimics Bedrock validation: enabled thinking
+// requires budget_tokens strictly below max_tokens. MAX upstream accepts the
+// illegal relation, so the gateway enforces it in Bedrock format.
+func rejectInvalidThinkingBudget(request *dto.ClaudeRequest) *types.NewAPIError {
+	if request.Thinking == nil || request.Thinking.Type != "enabled" ||
+		request.Thinking.BudgetTokens == nil || request.MaxTokens == nil {
+		return nil
+	}
+	if *request.Thinking.BudgetTokens >= int(*request.MaxTokens) {
+		return types.WithClaudeError(types.ClaudeError{
+			Type:    "invalid_request_error",
+			Message: "thinking: budget_tokens must be less than max_tokens",
+		}, http.StatusBadRequest)
+	}
+	return nil
 }
 
 // rejectUnsupportedServerTools checks the request tools for server-side tool

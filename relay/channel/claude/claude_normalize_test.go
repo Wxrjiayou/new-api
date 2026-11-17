@@ -276,12 +276,11 @@ func TestNormalizeClaudeBody_SafeguardResultsRemoved(t *testing.T) {
 }
 
 func TestBedrockOverlaySpeed(t *testing.T) {
-	// MAX returns speed:"standard"; Bedrock non-stream reports null and
-	// streaming usage has no speed key at all.
+	// MAX returns speed:"standard"; real Bedrock usage has no speed key at
+	// all in either mode (1117/1118 dual-reference captures).
 	body := `{"id":"msg_bdrk_01x","usage":{"input_tokens":8,"output_tokens":16,"speed":"standard"}}`
 	result := bedrockOverlayBody([]byte(body))
-	assert.True(t, gjson.GetBytes(result, "usage.speed").Exists())
-	assert.Equal(t, gjson.Null, gjson.GetBytes(result, "usage.speed").Type)
+	assert.False(t, gjson.GetBytes(result, "usage.speed").Exists())
 
 	start := `{"type":"message_start","message":{"id":"msg_bdrk_01x","usage":{"input_tokens":8,"speed":"standard"}}}`
 	assert.False(t, gjson.Get(bedrockOverlayStreamEvent(start, "message_start"), "message.usage.speed").Exists())
@@ -319,5 +318,72 @@ func TestBedrockRequestValidation(t *testing.T) {
 	}
 	assert.NotNil(t, rejectUnsupportedServerTools(toolRequest("web_search_20250305")))
 	assert.NotNil(t, rejectUnsupportedServerTools(toolRequest("code_execution_20250825")))
-	assert.Nil(t, rejectUnsupportedServerTools(toolRequest("web_fetch_20250910")), "real Bedrock accepts web_fetch declarations")
+	assert.NotNil(t, rejectUnsupportedServerTools(toolRequest("web_fetch_20250910")), "docs + LYQ reject web_fetch; XDM acceptance was a conversion-layer artifact")
+	assert.NotNil(t, rejectUnsupportedServerTools(toolRequest("web_fetch_20260209")))
+}
+
+func TestRejectInvalidThinkingBudget(t *testing.T) {
+	budget := 4096
+	lowBudget := 1024
+	max2048 := uint(2048)
+
+	rejected := &dto.ClaudeRequest{
+		Thinking:  &dto.Thinking{Type: "enabled", BudgetTokens: &budget},
+		MaxTokens: &max2048,
+	}
+	apiErr := rejectInvalidThinkingBudget(rejected)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	assert.Equal(t, "thinking: budget_tokens must be less than max_tokens", apiErr.Error())
+
+	accepted := []*dto.ClaudeRequest{
+		{Thinking: &dto.Thinking{Type: "enabled", BudgetTokens: &lowBudget}, MaxTokens: &max2048},
+		{Thinking: &dto.Thinking{Type: "adaptive", BudgetTokens: &budget}, MaxTokens: &max2048},
+		{Thinking: &dto.Thinking{Type: "enabled", BudgetTokens: &budget}},
+		{MaxTokens: &max2048},
+	}
+	for _, req := range accepted {
+		assert.Nil(t, rejectInvalidThinkingBudget(req))
+	}
+}
+
+func TestBedrockOverlayUsageKeyRemoval(t *testing.T) {
+	// Real Bedrock usage omits inference_geo / speed / iterations /
+	// server_tool_use entirely, and carries output_tokens_details only when
+	// thinking actually occurred.
+	body := `{"id":"msg_bdrk_01x","usage":{"input_tokens":8,"output_tokens":16,` +
+		`"inference_geo":"global","iterations":null,"server_tool_use":{"web_search_requests":0},` +
+		`"speed":"standard","output_tokens_details":null,"service_tier":"standard"}}`
+	result := bedrockOverlayBody([]byte(body))
+	for _, key := range []string{"usage.inference_geo", "usage.iterations", "usage.server_tool_use", "usage.speed", "usage.output_tokens_details"} {
+		assert.False(t, gjson.GetBytes(result, key).Exists(), key)
+	}
+	assert.Equal(t, "standard", gjson.GetBytes(result, "usage.service_tier").String(), "service_tier preserved")
+
+	withThinking := `{"id":"msg_bdrk_01y","usage":{"input_tokens":8,"output_tokens":16,"output_tokens_details":{"thinking_tokens":42}}}`
+	result = bedrockOverlayBody([]byte(withThinking))
+	assert.EqualValues(t, 42, gjson.GetBytes(result, "usage.output_tokens_details.thinking_tokens").Int(), "real breakdown preserved")
+
+	start := `{"type":"message_start","message":{"id":"msg_bdrk_01x","usage":{"input_tokens":8,` +
+		`"inference_geo":"global","iterations":null,"server_tool_use":null,"output_tokens_details":null,"speed":"fast"}}}`
+	streamed := bedrockOverlayStreamEvent(start, "message_start")
+	for _, key := range []string{"message.usage.inference_geo", "message.usage.iterations", "message.usage.server_tool_use", "message.usage.output_tokens_details", "message.usage.speed"} {
+		assert.False(t, gjson.Get(streamed, key).Exists(), key)
+	}
+	assert.True(t, gjson.Get(streamed, "message.usage.cache_creation").Exists(), "cache_creation nesting preserved")
+}
+
+func TestNormalizeContextManagementEchoForBedrock(t *testing.T) {
+	// LYQ (verified real Bedrock) echoes context_management when the beta is
+	// applied; the Bedrock path must pass it through instead of stripping.
+	body := `{"content":[],"context_management":{"applied_edits":[{"type":"clear_tool_uses"}]},"usage":{"input_tokens":8,"output_tokens":16}}`
+	result := normalizeClaudeBody([]byte(body), true)
+	assert.True(t, gjson.GetBytes(result, "context_management.applied_edits").Exists())
+	official := normalizeClaudeBody([]byte(body), false)
+	assert.False(t, gjson.GetBytes(official, "context_management").Exists(), "still stripped in official format")
+
+	start := `{"type":"message_start","message":{"model":"claude-sonnet-4-6","context_management":{"applied_edits":[]},"usage":{"input_tokens":8,"output_tokens":1}}}`
+	assert.True(t, gjson.Get(normalizeClaudeStreamEvent(start, "message_start", true), "message.context_management").Exists())
+	delta := `{"type":"message_delta","context_management":{"applied_edits":[]},"delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":16}}`
+	assert.True(t, gjson.Get(normalizeClaudeStreamEvent(delta, "message_delta", true), "context_management").Exists())
 }

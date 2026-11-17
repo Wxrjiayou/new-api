@@ -48,7 +48,12 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 		restoreBedrockIDs(request)
 	}
-	if request.MaxTokens != nil && *request.MaxTokens == 0 {
+	// An explicit max_tokens of 0 behaves as unset for thinking-model
+	// application; after that, Bedrock format maps it back to 1 (real
+	// Bedrock stops at one token) while other formats take the configured
+	// default below.
+	explicitZero := request.MaxTokens != nil && *request.MaxTokens == 0
+	if explicitZero {
 		request.MaxTokens = nil
 	}
 	if err := relayconvert.ApplyClaudeThinkingModel(request, info); err != nil {
@@ -62,8 +67,26 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		request.Thinking.BlockBinding = original.Thinking.BlockBinding
 	}
 	if request.MaxTokens == nil {
-		defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
-		request.MaxTokens = &defaultMaxTokens
+		if explicitZero && shouldBedrockFormat(info) {
+			one := uint(1)
+			request.MaxTokens = &one
+		} else {
+			defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
+			request.MaxTokens = &defaultMaxTokens
+		}
+	}
+	if shouldBedrockFormat(info) && request.MaxTokens != nil {
+		// Bedrock clamps an over-model-limit max_tokens and still returns
+		// 200; MAX would 400 with a first-party limit number in the message.
+		// The per-model default table doubles as the clamp ceiling — keep it
+		// aligned with the Bedrock model card (e.g. 64000 for Sonnet 4.6).
+		if limit := model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model); limit > 0 && int(*request.MaxTokens) > limit {
+			clamped := uint(limit)
+			request.MaxTokens = &clamped
+		}
+		if apiErr := rejectInvalidThinkingBudget(request); apiErr != nil {
+			return nil, WrapBedrockRequestError(apiErr)
+		}
 	}
 	// ApplyClaudeThinkingModel no longer rewrites request.Model. Do not write
 	// a still-suffixed name back over the entry-normalized UpstreamModelName

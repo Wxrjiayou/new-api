@@ -49,13 +49,10 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 		if claudeErr != nil {
 			return nil, claudeErr
 		}
-		// Anthropic requires max_tokens on Messages. Reject a missing value here
-		// instead of letting the adaptor default or a pass-through upstream accept
-		// it. count_tokens calls GetAndValidateClaudeRequest directly and takes no
-		// max_tokens, so it stays exempt.
-		if claudeRequest.MaxTokens == nil && claudeRequest.MaxTokensToSample == nil {
-			return nil, errors.New("max_tokens: Field required")
-		}
+		// A missing max_tokens is allowed through: the Claude adaptor injects
+		// the bounded per-model default before both pre-consume estimation
+		// (relay_info DefaultMaxTokens) and upstream send, matching Bedrock,
+		// which defaults instead of rejecting.
 		request = claudeRequest
 	case types.RelayFormatOpenAIResponses:
 		request, err = GetAndValidateResponsesRequest(c)
@@ -349,11 +346,10 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 	if ExceedsMaxTokensLimit(textRequest.MaxTokens, textRequest.MaxTokensToSample) {
 		return nil, errors.New("max_tokens is invalid")
 	}
-	// Anthropic requires max_tokens >= 1. Reject an explicit zero here, before
-	// pass-through or the adaptor default can turn it into a billable request.
-	if lo.FromPtrOr(textRequest.MaxTokens, uint(1)) == 0 || lo.FromPtrOr(textRequest.MaxTokensToSample, uint(1)) == 0 {
-		return nil, errors.New("max_tokens: Input should be greater than or equal to 1")
-	}
+	// An explicit zero is allowed through (Bedrock accepts it and stops at
+	// one token; the current Messages API uses 0 for cache pre-warming). The
+	// adaptor maps zero to a bounded value (1 for Bedrock format, the model
+	// default otherwise), so pre-consume never sees an unbounded multiplier.
 
 	//if textRequest.Stream {
 	//	relayInfo.IsStream = true

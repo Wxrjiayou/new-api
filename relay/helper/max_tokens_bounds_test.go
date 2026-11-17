@@ -57,12 +57,15 @@ func TestMaxTokensBounds(t *testing.T) {
 		require.EqualValues(t, 8192, *req.MaxTokens)
 	})
 
-	t.Run("claude explicit zero max_tokens rejected", func(t *testing.T) {
+	t.Run("claude explicit zero max_tokens accepted", func(t *testing.T) {
+		// Bedrock accepts zero (stops at one token) and the current Messages
+		// API uses it for cache pre-warming; the adaptor maps it to a bounded
+		// value before any quota math.
 		for _, field := range []string{"max_tokens", "max_tokens_to_sample"} {
 			c := newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"`+field+`":0}`)
-			_, err := GetAndValidateClaudeRequest(c)
-			require.Error(t, err, field)
-			require.Equal(t, "max_tokens: Input should be greater than or equal to 1", err.Error())
+			req, err := GetAndValidateClaudeRequest(c)
+			require.NoError(t, err, field)
+			require.NotNil(t, req)
 		}
 	})
 
@@ -73,14 +76,16 @@ func TestMaxTokensBounds(t *testing.T) {
 		require.Nil(t, req.MaxTokens)
 	})
 
-	t.Run("claude messages relay requires max_tokens", func(t *testing.T) {
+	t.Run("claude messages relay accepts missing max_tokens", func(t *testing.T) {
+		// Missing max_tokens is defaulted by the adaptor (bounded per-model
+		// default used for estimation), matching Bedrock's default behavior.
 		c := newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`)
-		_, err := GetAndValidateRequest(c, types.RelayFormatClaude)
-		require.Error(t, err)
-		require.Equal(t, "max_tokens: Field required", err.Error())
+		req, err := GetAndValidateRequest(c, types.RelayFormatClaude)
+		require.NoError(t, err)
+		require.NotNil(t, req)
 
 		c = newJSONContext(t, `{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`)
-		req, err := GetAndValidateRequest(c, types.RelayFormatClaude)
+		req, err = GetAndValidateRequest(c, types.RelayFormatClaude)
 		require.NoError(t, err)
 		require.NotNil(t, req)
 	})
