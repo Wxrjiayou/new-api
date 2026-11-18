@@ -365,9 +365,6 @@ func bedrockOverlayBody(data []byte) []byte {
 				data = setBytes(data, "content."+idx+".id", rewriteIDToBedrock(tid, "toolu_01", bedrockToolPrefix))
 			}
 		}
-		if value.Get("type").String() == "text" && !value.Get("citations").Exists() {
-			data = setBytes(data, "content."+idx+".citations", nil)
-		}
 		return true
 	})
 	return data

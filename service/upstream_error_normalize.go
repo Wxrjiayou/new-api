@@ -392,15 +392,31 @@ func wrapBedrockErrorFormat(apiErr *types.NewAPIError) *types.NewAPIError {
 	if apiErr == nil {
 		return nil
 	}
-	// Skip errors already wrapped elsewhere in the relay pipeline (or by a
-	// Bedrock-format upstream) so the SDK prefix is never nested twice.
+	// Errors already wrapped elsewhere in the relay pipeline (or by a
+	// Bedrock-format upstream) keep their SDK shell — never nest it twice —
+	// but still get the leading operation prefix the Bedrock SDK emits.
 	if strings.Contains(apiErr.Error(), "operation error Bedrock Runtime") {
-		return apiErr
+		msg := apiErr.Error()
+		if strings.HasPrefix(msg, "InvokeModel: ") {
+			return apiErr
+		}
+		msg = "InvokeModel: " + msg
+		wrapped := *apiErr
+		wrapped.Err = errors.New(msg)
+		switch relayErr := apiErr.RelayError.(type) {
+		case types.OpenAIError:
+			relayErr.Message = msg
+			wrapped.RelayError = relayErr
+		case types.ClaudeError:
+			relayErr.Message = msg
+			wrapped.RelayError = relayErr
+		}
+		return &wrapped
 	}
 	requestID := uuid.New().String()
 	exType := bedrockExceptionType(apiErr.StatusCode)
 	msg := apiErr.Error()
-	bedrockMsg := fmt.Sprintf("operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
+	bedrockMsg := fmt.Sprintf("InvokeModel: operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
 		apiErr.StatusCode, requestID, exType, msg)
 	wrapped := *apiErr
 	wrapped.Err = errors.New(bedrockMsg)
