@@ -495,3 +495,12 @@ func TestWrapBedrockErrorFormatNoDoubleWrap(t *testing.T) {
 	reWrapped := wrapBedrockErrorFormat(wrapped)
 	assert.Equal(t, wrapped.Error(), reWrapped.Error(), "already-wrapped error must not be wrapped again")
 }
+
+func TestWrapBedrockErrorFormat400KeepsAwsInvokeErrorType(t *testing.T) {
+	wrapped := wrapBedrockErrorFormat(makeAPIError("temperature: range: 0..1", http.StatusBadRequest))
+	require.Contains(t, wrapped.Error(), "InvokeModel: operation error Bedrock Runtime")
+	assert.Equal(t, "aws_invoke_error", wrapped.ToClaudeError().Type)
+
+	overloaded := wrapBedrockErrorFormat(makeAPIError("boom", http.StatusInternalServerError))
+	assert.Equal(t, "api_error", overloaded.ToClaudeError().Type, "non-400 keeps the documented type")
+}

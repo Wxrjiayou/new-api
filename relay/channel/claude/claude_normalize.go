@@ -14,6 +14,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
@@ -331,6 +332,55 @@ func rewriteIDFromBedrock(id string, bedrockPrefix, origPrefix string) string {
 	return id
 }
 
+// bedrockTopLevelKeyOrder is the observed top-level key order of real
+// Bedrock messages (1119 XDM/XJB captures): stop_details sits between
+// stop_sequence and usage. sjson appends added keys at the object tail, so
+// the overlay reorders once at exit. Keys outside the list keep their
+// original relative order at the end; nested objects are untouched.
+var bedrockTopLevelKeyOrder = []string{
+	"model", "id", "type", "role", "content", "container",
+	"stop_reason", "stop_sequence", "stop_details", "usage",
+}
+
+func reorderTopLevelJSON(data []byte) []byte {
+	result := gjson.GetBytes(data, "@this")
+	if !result.IsObject() {
+		return data
+	}
+	var original []string
+	values := map[string]string{}
+	result.ForEach(func(key, value gjson.Result) bool {
+		name := key.String()
+		if _, seen := values[name]; !seen {
+			original = append(original, name)
+		}
+		values[name] = value.Raw
+		return true
+	})
+	ordered := make([]string, 0, len(original))
+	placed := make(map[string]bool, len(bedrockTopLevelKeyOrder))
+	for _, name := range bedrockTopLevelKeyOrder {
+		if _, ok := values[name]; ok && !placed[name] {
+			ordered = append(ordered, name)
+			placed[name] = true
+		}
+	}
+	for _, name := range original {
+		if !placed[name] {
+			ordered = append(ordered, name)
+		}
+	}
+	parts := make([]string, 0, len(ordered))
+	for _, name := range ordered {
+		keyJSON, err := common.Marshal(name)
+		if err != nil {
+			return data
+		}
+		parts = append(parts, string(keyJSON)+":"+values[name])
+	}
+	return []byte("{" + strings.Join(parts, ",") + "}")
+}
+
 func bedrockOverlayBody(data []byte) []byte {
 	if id := gjson.GetBytes(data, "id").String(); strings.HasPrefix(id, "msg_01") {
 		data = setBytes(data, "id", rewriteIDToBedrock(id, "msg_01", bedrockMsgPrefix))
@@ -367,7 +417,7 @@ func bedrockOverlayBody(data []byte) []byte {
 		}
 		return true
 	})
-	return data
+	return reorderTopLevelJSON(data)
 }
 
 func bedrockOverlayStreamEvent(data string, eventType string) string {

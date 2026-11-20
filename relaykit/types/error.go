@@ -96,6 +96,18 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	// preserveClaudeErrorType opts out of the official-type remap in
+	// ToClaudeError. Only the Bedrock error-format wrap sets it, to mirror
+	// gateways that expose the internal AWS invoke error code to clients.
+	preserveClaudeErrorType bool
+}
+
+// SetPreserveClaudeErrorType keeps ToClaudeError from replacing a type that
+// is not in the official Claude error set with the status-mapped one.
+func (e *NewAPIError) SetPreserveClaudeErrorType() {
+	if e != nil {
+		e.preserveClaudeErrorType = true
+	}
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.
@@ -235,7 +247,7 @@ func (e *NewAPIError) ToClaudeError(upstreamURLs ...string) ClaudeError {
 			Type:    string(e.errorType),
 		}
 	}
-	if _, ok := claudeErrorTypes[result.Type]; !ok {
+	if _, ok := claudeErrorTypes[result.Type]; !ok && !e.preserveClaudeErrorType {
 		result.Type = claudeErrorTypeForStatus(e.StatusCode)
 	}
 	if e.errorCode != ErrorCodeCountTokenFailed {

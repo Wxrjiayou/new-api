@@ -289,6 +289,23 @@ func TestBedrockOverlaySpeed(t *testing.T) {
 	assert.False(t, gjson.Get(bedrockOverlayStreamEvent(delta, "message_delta"), "usage.speed").Exists())
 }
 
+func TestBedrockOverlayTopLevelKeyOrder(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-6","id":"msg_01ABC","type":"message","role":"assistant",` +
+		`"content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","stop_sequence":null,` +
+		`"usage":{"input_tokens":8,"output_tokens":10}}`
+	result := bedrockOverlayBody([]byte(body))
+	var keys []string
+	gjson.GetBytes(result, "@this").ForEach(func(k, _ gjson.Result) bool {
+		keys = append(keys, k.String())
+		return true
+	})
+	assert.Equal(t, []string{
+		"model", "id", "type", "role", "content",
+		"stop_reason", "stop_sequence", "stop_details", "usage",
+	}, keys, "stop_details reordered before usage; container stays deleted for the Bedrock format")
+	assert.True(t, strings.HasPrefix(gjson.GetBytes(result, "id").String(), "msg_bdrk_"))
+}
+
 func TestWrapBedrockRequestErrorNoDoubleWrap(t *testing.T) {
 	original := types.WithClaudeError(types.ClaudeError{Type: "invalid_request_error", Message: "temperature: range: 0..1"}, http.StatusBadRequest)
 	wrapped := WrapBedrockRequestError(original)

@@ -28,3 +28,10 @@ func TestToClaudeErrorUsesDocumentedTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestToClaudeErrorPreservedTypeSkipsStatusRemap(t *testing.T) {
+	e := WithClaudeError(ClaudeError{Type: "aws_invoke_error", Message: "InvokeModel: boom"}, http.StatusBadRequest)
+	assert.Equal(t, "invalid_request_error", e.ToClaudeError().Type, "without the flag the status remap still applies")
+	e.SetPreserveClaudeErrorType()
+	assert.Equal(t, "aws_invoke_error", e.ToClaudeError().Type, "the Bedrock wrap keeps its exposed code")
+}

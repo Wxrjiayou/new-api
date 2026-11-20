@@ -395,31 +395,51 @@ func wrapBedrockErrorFormat(apiErr *types.NewAPIError) *types.NewAPIError {
 	// Errors already wrapped elsewhere in the relay pipeline (or by a
 	// Bedrock-format upstream) keep their SDK shell — never nest it twice —
 	// but still get the leading operation prefix the Bedrock SDK emits.
-	if strings.Contains(apiErr.Error(), "operation error Bedrock Runtime") {
-		msg := apiErr.Error()
-		if strings.HasPrefix(msg, "InvokeModel: ") {
-			return apiErr
+	alreadyBedrock := strings.Contains(apiErr.Error(), "operation error Bedrock Runtime")
+	var bedrockMsg string
+	if alreadyBedrock {
+		bedrockMsg = apiErr.Error()
+		if !strings.HasPrefix(bedrockMsg, "InvokeModel: ") {
+			bedrockMsg = "InvokeModel: " + bedrockMsg
 		}
-		msg = "InvokeModel: " + msg
-		wrapped := *apiErr
-		wrapped.Err = errors.New(msg)
-		switch relayErr := apiErr.RelayError.(type) {
-		case types.OpenAIError:
-			relayErr.Message = msg
-			wrapped.RelayError = relayErr
-		case types.ClaudeError:
-			relayErr.Message = msg
-			wrapped.RelayError = relayErr
-		}
-		return &wrapped
+	} else {
+		requestID := uuid.New().String()
+		exType := bedrockExceptionType(apiErr.StatusCode)
+		bedrockMsg = fmt.Sprintf("InvokeModel: operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
+			apiErr.StatusCode, requestID, exType, apiErr.Error())
 	}
-	requestID := uuid.New().String()
-	exType := bedrockExceptionType(apiErr.StatusCode)
-	msg := apiErr.Error()
-	bedrockMsg := fmt.Sprintf("InvokeModel: operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
-		apiErr.StatusCode, requestID, exType, msg)
+	// XDM/XJB-class gateways surface the internal AWS invoke error code for
+	// Bedrock 400s; mirror it instead of the status-mapped official type.
+	// Other statuses keep the documented Claude error types.
+	is400 := apiErr.StatusCode == http.StatusBadRequest
+	if bedrockMsg == apiErr.Error() && !is400 {
+		return apiErr
+	}
 	wrapped := *apiErr
 	wrapped.Err = errors.New(bedrockMsg)
-	wrapped.RelayError = types.ClaudeError{Message: bedrockMsg}
+	switch relayErr := apiErr.RelayError.(type) {
+	case types.OpenAIError:
+		relayErr.Message = bedrockMsg
+		if is400 {
+			relayErr.Type = "aws_invoke_error"
+			relayErr.Code = "aws_invoke_error"
+		}
+		wrapped.RelayError = relayErr
+	case types.ClaudeError:
+		relayErr.Message = bedrockMsg
+		if is400 {
+			relayErr.Type = "aws_invoke_error"
+		}
+		wrapped.RelayError = relayErr
+	default:
+		claudeErr := types.ClaudeError{Message: bedrockMsg}
+		if is400 {
+			claudeErr.Type = "aws_invoke_error"
+		}
+		wrapped.RelayError = claudeErr
+	}
+	if is400 {
+		wrapped.SetPreserveClaudeErrorType()
+	}
 	return &wrapped
 }
