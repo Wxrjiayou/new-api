@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -45,7 +46,14 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	if shouldBedrockFormat(info) {
 		// Must run before the explicit-zero rewrite below, and the SDK shell
 		// must name the operation the request shape actually invokes.
-		if apiErr := rejectBedrockIncompatibleParams(request); apiErr != nil {
+		// fallbacks has no DTO home, so the raw body is the only place it
+		// can still be seen; a storage failure degrades to no-fallbacks
+		// (today's pass-through behaviour) instead of a false rejection.
+		var rawBody []byte
+		if storage, err := common.GetBodyStorage(c); err == nil {
+			rawBody, _ = storage.Bytes()
+		}
+		if apiErr := rejectBedrockIncompatibleParams(request, rawBody); apiErr != nil {
 			return nil, wrapBedrockRequestError(apiErr, bedrockRequestOperation(request))
 		}
 		if apiErr := rejectUnsupportedImageMediaTypes(request); apiErr != nil {

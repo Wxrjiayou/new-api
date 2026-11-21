@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
@@ -40,9 +42,11 @@ func rejectInvalidThinkingBudget(request *dto.ClaudeRequest) *types.NewAPIError 
 // rejectBedrockIncompatibleParams mimics the strict Bedrock Runtime request
 // schema (pydantic extra=forbid): fields that exist in our DTO but are
 // silently filtered before forwarding, the unsupported priority service tier,
-// and the stream + max_tokens=0 conflict must be rejected with the upstream
-// validation text verbatim instead of passing through as if accepted.
-func rejectBedrockIncompatibleParams(request *dto.ClaudeRequest) *types.NewAPIError {
+// the server-side fallbacks field (no DTO home — parsed away, so detected on
+// the raw body), and the stream + max_tokens=0 conflict must be rejected with
+// the upstream validation text verbatim instead of passing through as if
+// accepted.
+func rejectBedrockIncompatibleParams(request *dto.ClaudeRequest, rawBody []byte) *types.NewAPIError {
 	if request.InferenceGeo != "" {
 		return bedrockParamRejected("inference_geo: Extra inputs are not permitted")
 	}
@@ -51,6 +55,9 @@ func rejectBedrockIncompatibleParams(request *dto.ClaudeRequest) *types.NewAPIEr
 	}
 	if request.ServiceTier == "priority" {
 		return bedrockParamRejected("The provided service tier is not supported for this model.")
+	}
+	if gjson.GetBytes(rawBody, "fallbacks").Exists() {
+		return bedrockParamRejected("fallbacks: Extra inputs are not permitted")
 	}
 	if request.MaxTokens != nil && *request.MaxTokens == 0 &&
 		request.Stream != nil && *request.Stream {

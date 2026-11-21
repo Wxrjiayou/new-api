@@ -334,24 +334,26 @@ func TestRejectBedrockIncompatibleParams(t *testing.T) {
 	stream := true
 	notStream := false
 	for _, tc := range []struct {
-		name string
-		req  *dto.ClaudeRequest
-		want string
+		name    string
+		req     *dto.ClaudeRequest
+		rawBody string
+		want    string
 	}{
-		{"inference_geo", &dto.ClaudeRequest{InferenceGeo: "us"}, "inference_geo: Extra inputs are not permitted"},
-		{"speed", &dto.ClaudeRequest{Speed: json.RawMessage(`"fast"`)}, "speed: Extra inputs are not permitted"},
-		{"service_tier", &dto.ClaudeRequest{ServiceTier: "priority"}, "The provided service tier is not supported for this model."},
-		{"zero stream", &dto.ClaudeRequest{MaxTokens: &zero, Stream: &stream}, "stream cannot be true when max_tokens is 0"},
+		{"inference_geo", &dto.ClaudeRequest{InferenceGeo: "us"}, "", "inference_geo: Extra inputs are not permitted"},
+		{"speed", &dto.ClaudeRequest{Speed: json.RawMessage(`"fast"`)}, "", "speed: Extra inputs are not permitted"},
+		{"service_tier", &dto.ClaudeRequest{ServiceTier: "priority"}, "", "The provided service tier is not supported for this model."},
+		{"fallbacks raw-only", &dto.ClaudeRequest{}, `{"fallbacks":[{"model":"claude-haiku-4-5"}]}`, "fallbacks: Extra inputs are not permitted"},
+		{"zero stream", &dto.ClaudeRequest{MaxTokens: &zero, Stream: &stream}, "", "stream cannot be true when max_tokens is 0"},
 	} {
-		apiErr := rejectBedrockIncompatibleParams(tc.req)
+		apiErr := rejectBedrockIncompatibleParams(tc.req, []byte(tc.rawBody))
 		require.NotNil(t, apiErr, tc.name)
 		assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode, tc.name)
 		assert.Equal(t, tc.want, apiErr.Error(), tc.name)
 	}
 	// non-stream zero keeps the current one-token behaviour; clean passes.
-	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{MaxTokens: &zero, Stream: &notStream}))
-	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{ServiceTier: "standard"}))
-	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{}))
+	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{MaxTokens: &zero, Stream: &notStream}, nil))
+	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{ServiceTier: "standard"}, nil))
+	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{}, nil))
 }
 
 func TestWrapBedrockRequestErrorOperationName(t *testing.T) {
