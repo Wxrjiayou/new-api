@@ -43,6 +43,11 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 	}
 	if shouldBedrockFormat(info) {
+		// Must run before the explicit-zero rewrite below, and the SDK shell
+		// must name the operation the request shape actually invokes.
+		if apiErr := rejectBedrockIncompatibleParams(request); apiErr != nil {
+			return nil, wrapBedrockRequestError(apiErr, bedrockRequestOperation(request))
+		}
 		if apiErr := rejectUnsupportedImageMediaTypes(request); apiErr != nil {
 			return nil, WrapBedrockRequestError(apiErr)
 		}

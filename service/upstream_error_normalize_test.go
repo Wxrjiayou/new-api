@@ -496,6 +496,16 @@ func TestWrapBedrockErrorFormatNoDoubleWrap(t *testing.T) {
 	assert.Equal(t, wrapped.Error(), reWrapped.Error(), "already-wrapped error must not be wrapped again")
 }
 
+func TestWrapBedrockErrorFormatStreamOperationPrefix(t *testing.T) {
+	inner := "operation error Bedrock Runtime: InvokeModelWithResponseStream, https response error StatusCode: 400, RequestID: abc, ValidationException: stream cannot be true when max_tokens is 0"
+	wrapped := wrapBedrockErrorFormat(types.WithClaudeError(types.ClaudeError{Message: inner}, http.StatusBadRequest))
+	assert.Contains(t, wrapped.Error(),
+		"InvokeModelWithResponseStream: operation error Bedrock Runtime: InvokeModelWithResponseStream")
+	reWrapped := wrapBedrockErrorFormat(wrapped)
+	assert.Equal(t, wrapped.Error(), reWrapped.Error(), "stream op prefix must not double-wrap")
+	assert.Equal(t, "aws_invoke_error", wrapped.ToClaudeError().Type)
+}
+
 func TestWrapBedrockErrorFormat400KeepsAwsInvokeErrorType(t *testing.T) {
 	wrapped := wrapBedrockErrorFormat(makeAPIError("temperature: range: 0..1", http.StatusBadRequest))
 	require.Contains(t, wrapped.Error(), "InvokeModel: operation error Bedrock Runtime")

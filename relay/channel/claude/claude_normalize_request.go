@@ -37,6 +37,44 @@ func rejectInvalidThinkingBudget(request *dto.ClaudeRequest) *types.NewAPIError 
 	return nil
 }
 
+// rejectBedrockIncompatibleParams mimics the strict Bedrock Runtime request
+// schema (pydantic extra=forbid): fields that exist in our DTO but are
+// silently filtered before forwarding, the unsupported priority service tier,
+// and the stream + max_tokens=0 conflict must be rejected with the upstream
+// validation text verbatim instead of passing through as if accepted.
+func rejectBedrockIncompatibleParams(request *dto.ClaudeRequest) *types.NewAPIError {
+	if request.InferenceGeo != "" {
+		return bedrockParamRejected("inference_geo: Extra inputs are not permitted")
+	}
+	if len(request.Speed) > 0 {
+		return bedrockParamRejected("speed: Extra inputs are not permitted")
+	}
+	if request.ServiceTier == "priority" {
+		return bedrockParamRejected("The provided service tier is not supported for this model.")
+	}
+	if request.MaxTokens != nil && *request.MaxTokens == 0 &&
+		request.Stream != nil && *request.Stream {
+		return bedrockParamRejected("stream cannot be true when max_tokens is 0")
+	}
+	return nil
+}
+
+func bedrockParamRejected(msg string) *types.NewAPIError {
+	return types.WithClaudeError(types.ClaudeError{
+		Type:    "invalid_request_error",
+		Message: msg,
+	}, http.StatusBadRequest)
+}
+
+// bedrockRequestOperation names the Invoke call the request shape maps to;
+// the Bedrock SDK error shell quotes the same operation in both places.
+func bedrockRequestOperation(request *dto.ClaudeRequest) string {
+	if request.Stream != nil && *request.Stream {
+		return "InvokeModelWithResponseStream"
+	}
+	return "InvokeModel"
+}
+
 // rejectUnsupportedServerTools checks the request tools for server-side tool
 // types that Bedrock does not support. If any are found, it returns a 400
 // error mimicking the Bedrock rejection message.

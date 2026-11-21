@@ -399,7 +399,13 @@ func wrapBedrockErrorFormat(apiErr *types.NewAPIError) *types.NewAPIError {
 	var bedrockMsg string
 	if alreadyBedrock {
 		bedrockMsg = apiErr.Error()
-		if !strings.HasPrefix(bedrockMsg, "InvokeModel: ") {
+		// The leading wrap names the same operation the SDK shell carries;
+		// the streaming operation contains the plain one as a substring.
+		if strings.Contains(bedrockMsg, "operation error Bedrock Runtime: InvokeModelWithResponseStream") {
+			if !strings.HasPrefix(bedrockMsg, "InvokeModelWithResponseStream: ") {
+				bedrockMsg = "InvokeModelWithResponseStream: " + bedrockMsg
+			}
+		} else if !strings.HasPrefix(bedrockMsg, "InvokeModel: ") {
 			bedrockMsg = "InvokeModel: " + bedrockMsg
 		}
 	} else {

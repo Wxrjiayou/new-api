@@ -530,6 +530,10 @@ func bedrockMessageStop(inputTokens, outputTokens, cacheRead, cacheWrite int, fi
 }
 
 func WrapBedrockRequestError(apiErr *types.NewAPIError) *types.NewAPIError {
+	return wrapBedrockRequestError(apiErr, "InvokeModel")
+}
+
+func wrapBedrockRequestError(apiErr *types.NewAPIError, operation string) *types.NewAPIError {
 	if apiErr == nil {
 		return nil
 	}
@@ -555,7 +559,7 @@ func WrapBedrockRequestError(apiErr *types.NewAPIError) *types.NewAPIError {
 	}
 	reqID := uuid.New().String()
 	msg := apiErr.Error()
-	bedrockMsg := fmt.Sprintf("operation error Bedrock Runtime: InvokeModel, https response error StatusCode: %d, RequestID: %s, %s: %s",
-		apiErr.StatusCode, reqID, exType, msg)
+	bedrockMsg := fmt.Sprintf("operation error Bedrock Runtime: %s, https response error StatusCode: %d, RequestID: %s, %s: %s",
+		operation, apiErr.StatusCode, reqID, exType, msg)
 	return types.WithClaudeError(types.ClaudeError{Message: bedrockMsg}, apiErr.StatusCode)
 }

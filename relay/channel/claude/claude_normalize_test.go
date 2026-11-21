@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -326,6 +327,46 @@ func TestBedrockOverlayMessageIDNewFormat(t *testing.T) {
 	swapped := bedrockOverlayBody([]byte(old))
 	assert.Regexp(t, `^msg_bdrk_[a-z0-9]{52}$`, gjson.GetBytes(swapped, "id").String())
 	assert.Equal(t, "toolu_bdrk_01ABC", gjson.GetBytes(swapped, "content.0.id").String())
+}
+
+func TestRejectBedrockIncompatibleParams(t *testing.T) {
+	zero := uint(0)
+	stream := true
+	notStream := false
+	for _, tc := range []struct {
+		name string
+		req  *dto.ClaudeRequest
+		want string
+	}{
+		{"inference_geo", &dto.ClaudeRequest{InferenceGeo: "us"}, "inference_geo: Extra inputs are not permitted"},
+		{"speed", &dto.ClaudeRequest{Speed: json.RawMessage(`"fast"`)}, "speed: Extra inputs are not permitted"},
+		{"service_tier", &dto.ClaudeRequest{ServiceTier: "priority"}, "The provided service tier is not supported for this model."},
+		{"zero stream", &dto.ClaudeRequest{MaxTokens: &zero, Stream: &stream}, "stream cannot be true when max_tokens is 0"},
+	} {
+		apiErr := rejectBedrockIncompatibleParams(tc.req)
+		require.NotNil(t, apiErr, tc.name)
+		assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode, tc.name)
+		assert.Equal(t, tc.want, apiErr.Error(), tc.name)
+	}
+	// non-stream zero keeps the current one-token behaviour; clean passes.
+	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{MaxTokens: &zero, Stream: &notStream}))
+	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{ServiceTier: "standard"}))
+	assert.Nil(t, rejectBedrockIncompatibleParams(&dto.ClaudeRequest{}))
+}
+
+func TestWrapBedrockRequestErrorOperationName(t *testing.T) {
+	inner := types.WithClaudeError(types.ClaudeError{
+		Type: "invalid_request_error", Message: "stream cannot be true when max_tokens is 0",
+	}, http.StatusBadRequest)
+	streamed := wrapBedrockRequestError(inner, "InvokeModelWithResponseStream")
+	assert.Contains(t, streamed.Error(),
+		"operation error Bedrock Runtime: InvokeModelWithResponseStream, https response error StatusCode: 400")
+	plain := wrapBedrockRequestError(inner, "InvokeModel")
+	assert.Contains(t, plain.Error(),
+		"operation error Bedrock Runtime: InvokeModel, https response error StatusCode: 400")
+	streamOn := true
+	assert.Equal(t, "InvokeModelWithResponseStream", bedrockRequestOperation(&dto.ClaudeRequest{Stream: &streamOn}))
+	assert.Equal(t, "InvokeModel", bedrockRequestOperation(&dto.ClaudeRequest{}))
 }
 
 func TestWrapBedrockRequestErrorNoDoubleWrap(t *testing.T) {
