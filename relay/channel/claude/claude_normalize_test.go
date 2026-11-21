@@ -306,6 +306,28 @@ func TestBedrockOverlayTopLevelKeyOrder(t *testing.T) {
 	assert.True(t, strings.HasPrefix(gjson.GetBytes(result, "id").String(), "msg_bdrk_"))
 }
 
+func TestBedrockOverlayMessageIDNewFormat(t *testing.T) {
+	body := `{"id":"msg_01ABC","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":8,"output_tokens":10}}`
+	result := bedrockOverlayBody([]byte(body))
+	id := gjson.GetBytes(result, "id").String()
+	assert.Regexp(t, `^msg_bdrk_[a-z0-9]{52}$`, id, "XJB-class new-generation message id")
+
+	// Idempotent: an id already in the new format survives unchanged.
+	again := bedrockOverlayBody(result)
+	assert.Equal(t, id, gjson.GetBytes(again, "id").String())
+
+	start := `{"type":"message_start","message":{"id":"msg_01ABC","usage":{"input_tokens":8}}}`
+	got := bedrockOverlayStreamEvent(start, "message_start")
+	assert.Regexp(t, `^msg_bdrk_[a-z0-9]{52}$`, gjson.Get(got, "message.id").String())
+
+	// Old-format Bedrock ids from a Bedrock-upstream pool regenerate too;
+	// tool ids keep the prefix-swap behaviour.
+	old := `{"id":"msg_bdrk_01XyZ","content":[{"type":"tool_use","id":"toolu_01ABC","name":"f","input":{}}]}`
+	swapped := bedrockOverlayBody([]byte(old))
+	assert.Regexp(t, `^msg_bdrk_[a-z0-9]{52}$`, gjson.GetBytes(swapped, "id").String())
+	assert.Equal(t, "toolu_bdrk_01ABC", gjson.GetBytes(swapped, "content.0.id").String())
+}
+
 func TestWrapBedrockRequestErrorNoDoubleWrap(t *testing.T) {
 	original := types.WithClaudeError(types.ClaudeError{Type: "invalid_request_error", Message: "temperature: range: 0..1"}, http.StatusBadRequest)
 	wrapped := WrapBedrockRequestError(original)

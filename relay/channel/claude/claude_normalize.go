@@ -72,6 +72,20 @@ func randBase62(length int) string {
 	return string(result)
 }
 
+const base36Chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+func randBase36(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		b = make([]byte, length)
+	}
+	result := make([]byte, length)
+	for i := range result {
+		result[i] = base36Chars[int(b[i])%36]
+	}
+	return string(result)
+}
+
 func genRequestID() string {
 	ts := uint64(time.Now().UnixMilli())
 	return "req_01" + encodeUint64Base62(ts, 7) + randBase62(15)
@@ -315,8 +329,30 @@ func IsStreamHeaderAllowed(name string) bool {
 // --- Bedrock format overlay ---
 // Applied after Claude normalization to make MAX responses match AWS Bedrock.
 
-const bedrockMsgPrefix = "msg_bdrk_01"
 const bedrockToolPrefix = "toolu_bdrk_01"
+
+// New-generation Bedrock message ids (XJB-class accounts since 1120):
+// msg_bdrk_ + 52 lowercase base36 characters, no 01 segment. Message ids are
+// never echoed in later requests, so they are regenerated outright instead of
+// being prefix-swapped like tool ids.
+const bedrockNewMsgPrefix = "msg_bdrk_"
+const bedrockNewMsgBodyLen = 52
+
+func newBedrockMessageID() string {
+	return bedrockNewMsgPrefix + randBase36(bedrockNewMsgBodyLen)
+}
+
+func isBedrockNewMessageID(id string) bool {
+	if !strings.HasPrefix(id, bedrockNewMsgPrefix) || len(id) != len(bedrockNewMsgPrefix)+bedrockNewMsgBodyLen {
+		return false
+	}
+	for i := len(bedrockNewMsgPrefix); i < len(id); i++ {
+		if !strings.ContainsRune(base36Chars, rune(id[i])) {
+			return false
+		}
+	}
+	return true
+}
 
 func rewriteIDToBedrock(id string, origPrefix, bedrockPrefix string) string {
 	if strings.HasPrefix(id, origPrefix) {
@@ -382,8 +418,8 @@ func reorderTopLevelJSON(data []byte) []byte {
 }
 
 func bedrockOverlayBody(data []byte) []byte {
-	if id := gjson.GetBytes(data, "id").String(); strings.HasPrefix(id, "msg_01") {
-		data = setBytes(data, "id", rewriteIDToBedrock(id, "msg_01", bedrockMsgPrefix))
+	if id := gjson.GetBytes(data, "id").String(); strings.HasPrefix(id, "msg_") && !isBedrockNewMessageID(id) {
+		data = setBytes(data, "id", newBedrockMessageID())
 	}
 	if !gjson.GetBytes(data, "stop_details").Exists() {
 		data = setBytes(data, "stop_details", nil)
@@ -423,8 +459,8 @@ func bedrockOverlayBody(data []byte) []byte {
 func bedrockOverlayStreamEvent(data string, eventType string) string {
 	switch eventType {
 	case "message_start":
-		if id := gjson.Get(data, "message.id").String(); strings.HasPrefix(id, "msg_01") {
-			data = setStr(data, "message.id", rewriteIDToBedrock(id, "msg_01", bedrockMsgPrefix))
+		if id := gjson.Get(data, "message.id").String(); strings.HasPrefix(id, "msg_") && !isBedrockNewMessageID(id) {
+			data = setStr(data, "message.id", newBedrockMessageID())
 		}
 		if !gjson.Get(data, "message.stop_details").Exists() {
 			data = setStr(data, "message.stop_details", nil)
