@@ -92,7 +92,7 @@ export function LogsFilterInput(props: ComponentProps<typeof Input>) {
 
 export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
   const { t } = useTranslation()
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(true)
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const isMobile = useMediaQuery('(max-width: 640px)')
 
